@@ -331,6 +331,8 @@ def _polish_dialog(dlg: Gtk.Dialog) -> None:
     aa.set_margin_top(8)
     aa.set_margin_bottom(16)
     aa.set_spacing(6)
+    aa.set_layout(Gtk.ButtonBoxStyle.EXPAND)
+    aa.set_homogeneous(True)
 
 
 def _alert(parent, title: str, body: str = '', msg_type=Gtk.MessageType.INFO):
