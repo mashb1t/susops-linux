@@ -15,22 +15,27 @@ depends=(
     'autossh'
     'openbsd-netcat'
 )
-source=("susops-linux::git+file://${startdir}")
-sha256sums=('SKIP')
+makedepends=('git')
+source=(
+    "${pkgname}::git+https://github.com/mashb1t/susops-linux.git"
+    "susops-cli::git+https://github.com/mashb1t/susops-cli.git"
+)
+sha256sums=('SKIP' 'SKIP')
 
 pkgver() {
-    python3 -c "exec(open('${startdir}/version.py').read()); print(VERSION)"
+    cd "${pkgname}"
+    python3 -c "exec(open('version.py').read()); print(VERSION)"
 }
 
 prepare() {
-    cd "susops-linux"
+    cd "${pkgname}"
     git submodule init
-    git config submodule.susops-cli.url "file://${startdir}/susops-cli"
+    git config submodule.susops-cli.url "${srcdir}/susops-cli"
     git -c protocol.file.allow=always submodule update
 }
 
 package() {
-    cd "susops-linux"
+    cd "${pkgname}"
 
     # App files
     install -Dm644 susops_tray.py "$pkgdir/usr/lib/susops/susops_tray.py"

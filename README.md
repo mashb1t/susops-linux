@@ -32,13 +32,14 @@ local / remote port-forwards, and tweak settings without touching a terminal.
 ## Requirements
 
 * Linux with a system tray (GNOME + AppIndicator extension, KDE, XFCE, etc.)
-* Python 3.14+
-* System packages — see [`requirements-system.txt`](requirements-system.txt) for distro-specific install commands:
+* Python 3
+* System packages:
   * `go-yq` (Mike Farah's yq v4) — **not** the Python-based `yq`
   * `autossh`
   * `netcat` / `openbsd-netcat`
   * `gtk3`
   * `python-gobject` (PyGObject)
+  * `libayatana-appindicator`
 * A remote host you have SSH access to
 
 ## Setup
@@ -56,24 +57,16 @@ Or if you already cloned without `--recursive`:
 git submodule update --init
 ```
 
-### 2. Install system dependencies
-
-```bash
-# Arch Linux
-sudo pacman -S go-yq autossh openbsd-netcat gtk3 python-gobject
-
-# Debian / Ubuntu
-sudo apt install golang-github-mikefarah-yq autossh netcat-openbsd \
-  python3-gi python3-gi-cairo gir1.2-gtk-3.0
-```
-
-### 3. Install the app
+### 2. Install dependencies and the app
 
 ```bash
 ./build.sh
 ```
 
-The script installs the app to `~/.local` and optionally adds it to autostart.
+`./build.sh` automatically detects your package manager (`pacman`, `apt`, `dnf`, `zypper`, `apk`) and installs system dependencies before installing the app.
+
+- **Arch Linux** — installs as a proper pacman package via `makepkg`.
+- **All other distros** — installs to `~/.local` (no root required for app files).
 
 To uninstall:
 
@@ -95,15 +88,18 @@ To uninstall:
 > `go-yq` (Mike Farah's yq v4) is required. The Python-based `yq` package is **incompatible**.
 > On Arch Linux: install `go-yq`, not `yq`.
 
-## Build from source (development)
+## Development
 
 ```bash
-# 1 – Clone with submodule
+# Clone with submodule
 git clone --recursive https://github.com/mashb1t/susops-linux.git
 cd susops-linux
 
-# 2 – Run directly (no venv needed — uses system python-gobject)
+# Run directly (uses system python-gobject, no venv needed)
 python3 susops_tray.py
+
+# Test the installed version
+./build.sh --run
 ```
 
 > [!IMPORTANT]
@@ -112,12 +108,23 @@ python3 susops_tray.py
 
 ## Runtime files
 
-| Location                      | Purpose                                       |
-|-------------------------------|-----------------------------------------------|
-| `~/.susops/`                  | Same config files the CLI uses.               |
-| `~/.local/bin/susops-tray`    | Launcher script created by `build.sh`.        |
-| `~/.local/share/susops/`      | Installed app files (script, icons, CLI).     |
-| `~/.config/autostart/`        | Autostart desktop entry (optional).           |
+### Arch Linux (installed via pacman)
+
+| Location                                          | Purpose                              |
+|---------------------------------------------------|--------------------------------------|
+| `~/.susops/`                                      | Config files shared with the CLI.    |
+| `/usr/bin/susops-tray`                            | Launcher script.                     |
+| `/usr/lib/susops/`                                | App files (script, icons, CLI).      |
+| `/usr/share/applications/susops-tray.desktop`     | Desktop entry.                       |
+
+### Other distros (installed to `~/.local`)
+
+| Location                                               | Purpose                              |
+|--------------------------------------------------------|--------------------------------------|
+| `~/.susops/`                                           | Config files shared with the CLI.    |
+| `~/.local/bin/susops-tray`                             | Launcher script.                     |
+| `~/.local/lib/susops/`                                 | App files (script, icons, CLI).      |
+| `~/.local/share/applications/susops-tray.desktop`      | Desktop entry.                       |
 
 ## How To Use SusOps As Docker Proxy
 
@@ -128,7 +135,7 @@ See [SusOps CLI Readme](https://github.com/mashb1t/susops-cli?tab=readme-ov-file
 | Problem | Solution |
 |---------|----------|
 | **Tray icon doesn't appear** | Install an AppIndicator extension. On GNOME: [AppIndicator and KStatusNotifierItem Support](https://extensions.gnome.org/extension/615/appindicator-support/). |
-| **`susops-tray` not found after install** | Ensure `~/.local/bin` is in your `$PATH`. Add `export PATH="$HOME/.local/bin:$PATH"` to your shell profile. |
+| **`susops-tray` not found after install** | Arch: ensure `/usr/bin` is in your `$PATH`. Other distros: add `export PATH="$HOME/.local/bin:$PATH"` to your shell profile. |
 | **SusOps in state "error"** | Ensure you have configured a connection and `~/.susops/` exists. Run `so add-connection <tag> <ssh_host> <socks_port>` first. |
 | **Proxy doesn't start** | Verify you can SSH to the host manually. Check that `go-yq` (v4) is installed, not the Python-based `yq`. |
 | **`yq` errors in logs** | You have the wrong `yq`. Install `go-yq` (Arch: `sudo pacman -S go-yq`). |
@@ -139,7 +146,7 @@ See [SusOps CLI Readme](https://github.com/mashb1t/susops-cli?tab=readme-ov-file
 
 ## Contributing
 
-1. Set up the project as described above in "Build from source (development)".
+1. Set up the project as described above in "Development".
 2. Create a feature branch.
 3. `python3 susops_tray.py` while hacking the UI.
 4. `./build.sh --run` to test the installed version.
@@ -147,5 +154,5 @@ See [SusOps CLI Readme](https://github.com/mashb1t/susops-cli?tab=readme-ov-file
 
 ## License
 
-MIT © 2025 Manuel Schmid — see [LICENSE](LICENSE).
+MIT © 2025 Manuel Schmid — see [LICENSE](LICENSE.txt).
 [**SusOps CLI**](https://github.com/mashb1t/susops-cli) (submodule) retains its own [license](https://github.com/mashb1t/susops-cli/blob/main/LICENSE.txt).
