@@ -1,6 +1,6 @@
 app-id: org.susops.App
 runtime: org.gnome.Platform
-runtime-version: '47'
+runtime-version: '48'
 sdk: org.gnome.Sdk
 command: susops-tray
 
@@ -23,13 +23,21 @@ finish-args:
   - --talk-name=org.freedesktop.portal.Desktop
 
 modules:
+  # ── intltool (build-only, required by libdbusmenu configure) ────────────────
+  - name: intltool
+    buildsystem: autotools
+    cleanup:
+      - '*'
+    sources:
+      - type: archive
+        url: https://launchpad.net/intltool/trunk/0.51.0/+download/intltool-0.51.0.tar.gz
+        sha256: 67c74d94196b153b774ab9f89b2fa6c6ba79352407037c8c14d5aeb334e959cd
+
   # ── libdbusmenu (required by libayatana-appindicator) ───────────────────────
   - name: libdbusmenu
     buildsystem: autotools
     build-options:
       cflags: -Wno-error
-      env:
-        HAVE_VALGRIND: '0'
     config-opts:
       - --with-gtk=3
       - --disable-dumper
@@ -38,22 +46,34 @@ modules:
       - --disable-gtk-doc
       - --disable-vala
       - --enable-introspection=yes
+      - --disable-nls
+      - --without-valgrind
     sources:
       - type: archive
-        url: https://launchpad.net/dbusmenu/trunk/16.04.0/+download/libdbusmenu-16.04.0.tar.gz
+        url: https://launchpad.net/libdbusmenu/16.04/16.04.0/+download/libdbusmenu-16.04.0.tar.gz
         sha256: b9cc4a2acd74509435892823607d966d424bd9ad5d0b00938f27240a1bfa878a
         x-checker-data:
           type: anitya
           project-id: 10-1
           stable-only: true
+      - type: patch
+        path: libdbusmenu-valgrind-conditional.patch
 
-  # ── libayatana-ido (optional widgets for indicators) ────────────────────────
-  - name: libayatana-ido
+  # ── ayatana-ido (required by libayatana-indicator) ──────────────────────────
+  - name: ayatana-ido
     buildsystem: cmake-ninja
     sources:
-      - type: git
-        url: https://github.com/AyatanaIndicators/libayatana-ido.git
-        tag: '0.10.1'
+      - type: archive
+        url: https://github.com/AyatanaIndicators/ayatana-ido/archive/refs/tags/0.10.4.tar.gz
+        sha256: bd59abd5f1314e411d0d55ce3643e91cef633271f58126be529de5fb71c5ab38
+
+  # ── libayatana-indicator (required by libayatana-appindicator) ─────────────
+  - name: libayatana-indicator
+    buildsystem: cmake-ninja
+    sources:
+      - type: archive
+        url: https://github.com/AyatanaIndicators/libayatana-indicator/archive/refs/tags/0.9.4.tar.gz
+        sha256: a18d3c682e29afd77db24366f8475b26bda22b0e16ff569a2ec71cd6eb4eac95
 
   # ── libayatana-appindicator (system tray indicator) ─────────────────────────
   - name: libayatana-appindicator
@@ -61,10 +81,11 @@ modules:
     config-opts:
       - -DENABLE_BINDINGS_MONO=NO
       - -DENABLE_BINDINGS_VALA=NO
+      - -DENABLE_GTKDOC=NO
     sources:
-      - type: git
-        url: https://github.com/AyatanaIndicators/libayatana-appindicator.git
-        tag: '0.5.93'
+      - type: archive
+        url: https://github.com/AyatanaIndicators/libayatana-appindicator/archive/refs/tags/0.5.94.tar.gz
+        sha256: 884a6bc77994c0b58c961613ca4c4b974dc91aa0f804e70e92f38a542d0d0f90
 
   # ── SusOps tray app ──────────────────────────────────────────────────────────
   - name: susops-tray

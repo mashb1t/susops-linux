@@ -40,9 +40,9 @@ flatpak remote-add --user --if-not-exists flathub \
   https://flathub.org/repo/flathub.flatpakrepo 2>/dev/null || true
 
 # ── Runtime / SDK ─────────────────────────────────────────────────────────────
-echo "==> Installing GNOME Platform 47 runtime and SDK (if needed) …"
+echo "==> Installing GNOME Platform 48 runtime and SDK (if needed) …"
 flatpak install --user -y --or-update \
-  flathub org.gnome.Platform//47 org.gnome.Sdk//47 \
+  flathub org.gnome.Platform//48 org.gnome.Sdk//48 \
   2>/dev/null || {
     echo "WARNING: Could not install via Flathub. If already installed, continuing …"
   }
@@ -53,7 +53,7 @@ flatpak-builder \
   --force-clean \
   --user \
   --install \
-  --state-dir="$BUILD_DIR/.flatpak-builder-state" \
+  --state-dir="$SCRIPT_DIR/.flatpak-builder-state" \
   "$BUILD_DIR" \
   "$MANIFEST"
 
