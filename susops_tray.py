@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 """SusOps System Tray Application for Linux — feature parity with susops-mac."""
 
 import gi
@@ -6,7 +6,6 @@ gi.require_version('Gtk', '3.0')
 
 import os
 import re
-import shlex
 import shutil
 import subprocess
 import threading
@@ -60,22 +59,70 @@ ICON_PATH = next(
     '',
 )
 
+# Search order for the per-state SVG icon directory
+_ICONS_DIR = next(
+    (p for p in [
+        os.path.join(_bundle, 'icons') if _bundle else None,
+        os.path.join(_here, 'icons'),
+        os.path.expanduser('~/.local/share/susops/icons'),
+    ] if p and os.path.isdir(p)),
+    None,
+)
+
+def _is_dark_theme() -> bool:
+    """Return True when the desktop is using a dark colour scheme."""
+    try:
+        import subprocess
+        out = subprocess.run(
+            ['gsettings', 'get', 'org.gnome.desktop.interface', 'color-scheme'],
+            capture_output=True, text=True, timeout=2).stdout.strip()
+        if 'dark' in out.lower():
+            return True
+        out = subprocess.run(
+            ['gsettings', 'get', 'org.gnome.desktop.interface', 'gtk-theme'],
+            capture_output=True, text=True, timeout=2).stdout.strip()
+        return 'dark' in out.lower()
+    except Exception:
+        return False
+
+def _state_icon_path(state_name: str) -> str:
+    """Return absolute path to the PNG (converted from SVG) for the given state name."""
+    if not _ICONS_DIR:
+        return ICON_PATH
+    variant = 'dark' if _is_dark_theme() else 'light'
+    svg = os.path.join(_ICONS_DIR, 'colored_glasses', variant, f'{state_name}.svg')
+    if not os.path.exists(svg):
+        return ICON_PATH
+    # Convert SVG → PNG into a per-user cache dir (22 px — standard tray size)
+    cache_dir = os.path.expanduser('~/.cache/susops/icons')
+    os.makedirs(cache_dir, exist_ok=True)
+    png = os.path.join(cache_dir, f'{state_name}_{variant}.png')
+    if not os.path.exists(png):
+        try:
+            pb = GdkPixbuf.Pixbuf.new_from_file_at_size(svg, 22, 22)
+            pb.savev(png, 'png', [], [])
+        except Exception:
+            return ICON_PATH
+    return png
+
 VERSION = '1.0.0'
 BIND_ADDRESSES = ['localhost', '172.17.0.1', '0.0.0.0']
 
 
 # ── Enums ─────────────────────────────────────────────────────────────────────
 class ProcessState(Enum):
-    INITIAL           = ('initial',           '#888888')
-    RUNNING           = ('running',           '#33cc33')
-    STOPPED_PARTIALLY = ('stopped partially', '#ff9900')
-    STOPPED           = ('stopped',           '#888888')
-    ERROR             = ('error',             '#cc3333')
+    INITIAL           = ('initial',           '#888888', 'stopped')
+    RUNNING           = ('running',           '#33cc33', 'running')
+    STOPPED_PARTIALLY = ('stopped partially', '#ff9900', 'stopped_partially')
+    STOPPED           = ('stopped',           '#888888', 'stopped')
+    ERROR             = ('error',             '#cc3333', 'error')
 
     @property
-    def label(self): return self.value[0]
+    def label(self):    return self.value[0]
     @property
-    def color(self): return self.value[1]
+    def color(self):    return self.value[1]
+    @property
+    def icon_name(self): return self.value[2]
 
 
 # ── Config helper (direct yq access, mirrors macOS ConfigHelper) ──────────────
@@ -187,20 +234,22 @@ def discover_browsers() -> list[dict]:
 # ── susops command execution ──────────────────────────────────────────────────
 def _build_cmd(susops_args: str) -> list[str]:
     if SUSOPS_SH:
-        script = f'source {shlex.quote(SUSOPS_SH)} && susops {susops_args}'
+        cmd = [SUSOPS_SH] + susops_args.split()
     else:
-        script = f'susops {susops_args}'
+        cmd = ['susops'] + susops_args.split()
     if IS_FLATPAK:
-        return ['flatpak-spawn', '--host', '/bin/bash', '-c', script]
-    return ['/bin/bash', '-c', script]
+        return ['flatpak-spawn', '--host'] + cmd
+    return cmd
 
 
 def run_cmd(susops_args: str, timeout: int = 30) -> tuple[str, int]:
-    """Run susops command. Returns (stdout, returncode)."""
+    """Run susops command. Returns (combined stdout+stderr, returncode)."""
     try:
         r = subprocess.run(_build_cmd(susops_args),
                            capture_output=True, text=True, timeout=timeout)
-        return r.stdout.strip(), r.returncode
+        # Prefer stdout; fall back to stderr so errors are never silently swallowed
+        out = r.stdout.strip() or r.stderr.strip()
+        return out, r.returncode
     except subprocess.TimeoutExpired:
         return 'Command timed out', 1
     except Exception as exc:
@@ -837,22 +886,48 @@ class SusOpsApp:
     # ── Indicator setup ───────────────────────────────────────────────────────
 
     def _setup_indicator(self):
-        icon = ICON_PATH if os.path.exists(ICON_PATH) else 'network-vpn'
+        icon = _state_icon_path(ProcessState.STOPPED.icon_name) or ICON_PATH or 'network-vpn'
         if _INDICATOR_BACKEND:
             self._indicator = _AI3.Indicator.new(
                 'org.susops.App', icon,
                 _AI3.IndicatorCategory.APPLICATION_STATUS)
+            # Tell AppIndicator where to find our per-state PNG files
+            cache_dir = os.path.expanduser('~/.cache/susops/icons')
+            if os.path.isdir(cache_dir):
+                self._indicator.set_icon_theme_path(cache_dir)
             self._indicator.set_status(_AI3.IndicatorStatus.ACTIVE)
             self._indicator.set_menu(self._menu)
         else:
             self._si = Gtk.StatusIcon()
-            if os.path.exists(ICON_PATH):
-                self._si.set_from_file(ICON_PATH)
-            else:
-                self._si.set_from_icon_name('network-vpn')
+            self._update_status_icon(ProcessState.STOPPED)
             self._si.set_tooltip_text('SusOps'); self._si.set_visible(True)
             self._si.connect('activate',   lambda i: self._menu.popup(None, None, None, None, 0, Gtk.get_current_event_time()))
             self._si.connect('popup-menu', lambda i, b, t: self._menu.popup(None, None, None, None, b, t))
+
+    def _update_tray_icon(self, state: 'ProcessState'):
+        try:
+            icon_path = _state_icon_path(state.icon_name)
+            if _INDICATOR_BACKEND:
+                if icon_path and os.path.exists(icon_path):
+                    # AppIndicator needs icon name (no path, no extension) + theme path set
+                    icon_name = os.path.splitext(os.path.basename(icon_path))[0]
+                    self._indicator.set_icon_theme_path(os.path.dirname(icon_path))
+                    self._indicator.set_icon_full(icon_name, state.label)
+                else:
+                    self._indicator.set_icon_full(ICON_PATH or 'network-vpn', state.label)
+            elif hasattr(self, '_si'):
+                self._update_status_icon(state)
+        except Exception:
+            pass
+
+    def _update_status_icon(self, state: 'ProcessState'):
+        icon = _state_icon_path(state.icon_name)
+        if icon and os.path.exists(icon):
+            self._si.set_from_file(icon)
+        elif os.path.exists(ICON_PATH):
+            self._si.set_from_file(ICON_PATH)
+        else:
+            self._si.set_from_icon_name('network-vpn')
 
     # ── Menu construction ─────────────────────────────────────────────────────
 
@@ -1066,7 +1141,6 @@ class SusOpsApp:
     def _apply_state(self, new_state: ProcessState):
         if new_state == self._state:
             return
-        self._state = new_state
 
         # Update status dot + label
         color = new_state.color
@@ -1074,18 +1148,24 @@ class SusOpsApp:
             f'<span foreground="{color}" size="large">●</span>')
         self._status_label.set_markup(
             f'<b>Status:</b> {new_state.label}')
+        self._status_item.show_all()
+
+        # Update tray icon (wrapped in try/except inside _update_tray_icon)
+        self._update_tray_icon(new_state)
 
         # Update menu item sensitivity (mirrors macOS behavior exactly)
-        running   = new_state == ProcessState.RUNNING
-        partial   = new_state == ProcessState.STOPPED_PARTIALLY
-        stopped   = new_state == ProcessState.STOPPED
-        error     = new_state == ProcessState.ERROR
+        running = new_state == ProcessState.RUNNING
+        partial = new_state == ProcessState.STOPPED_PARTIALLY
+        error   = new_state == ProcessState.ERROR
 
         self._start_item.set_sensitive(not running and not error)
         self._stop_item.set_sensitive(running or partial)
         self._restart_item.set_sensitive(running or partial)
         self._test_any_item.set_sensitive(running or partial)
         self._test_all_item.set_sensitive(running or partial)
+
+        # Only commit the new state once all UI updates have succeeded
+        self._state = new_state
 
     # ── Welcome / init dialog ─────────────────────────────────────────────────
 
@@ -1222,6 +1302,10 @@ class SusOpsApp:
         run_async('restart', self._after_proxy_cmd, timeout=60)
 
     def _after_proxy_cmd(self, out: str, rc: int):
+        # Reset state so _apply_state always re-runs (buttons may have been
+        # disabled by _on_start/_on_stop and must be re-enabled regardless
+        # of whether the state actually changed)
+        self._state = ProcessState.INITIAL
         self._poll()
         if rc != 0 and out:
             _alert(self._root, 'Error', out, Gtk.MessageType.ERROR)

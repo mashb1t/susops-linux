@@ -1,40 +1,34 @@
 #!/usr/bin/env bash
-# build.sh – Build susops-tray as a standalone binary using PyInstaller
+# build.sh – Install susops-tray (Python GTK app) as a runnable binary
 #
 # Usage:
-#   ./build.sh              # build → dist/susops-tray
-#   ./build.sh --install    # build + install to ~/.local/bin + autostart
+#   ./build.sh              # install to ~/.local
 #   ./build.sh --uninstall  # remove installed files
+#   ./build.sh --run        # install + launch
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BINARY="$SCRIPT_DIR/dist/susops-tray"
-INSTALL_BIN="$HOME/.local/bin/susops-tray"
-DESKTOP_SRC="$SCRIPT_DIR/susops-tray.desktop"
-DESKTOP_DST="$HOME/.local/share/applications/susops-tray.desktop"
-ICON_SRC="$SCRIPT_DIR/susops-cli/icon.png"
-ICON_DST="$HOME/.local/share/icons/hicolor/128x128/apps/org.susops.App.png"
-
 PYTHON="${PYTHON:-/usr/bin/python3}"
-ACTION="${1-build}"
+ACTION="${1-install}"
+
+APP_DATA="$HOME/.local/share/susops"
+INSTALL_BIN="$HOME/.local/bin/susops-tray"
+DESKTOP_DST="$HOME/.local/share/applications/susops-tray.desktop"
+ICON_DST="$HOME/.local/share/icons/hicolor/128x128/apps/org.susops.App.png"
 
 # ── Uninstall ─────────────────────────────────────────────────────────────────
 if [[ "$ACTION" == "--uninstall" ]]; then
   echo "==> Uninstalling susops-tray …"
   rm -f "$INSTALL_BIN" "$DESKTOP_DST" "$ICON_DST" \
         "$HOME/.config/autostart/susops-tray.desktop"
+  rm -rf "$APP_DATA"
   echo "Done."
   exit 0
 fi
 
 # ── Dependency checks ─────────────────────────────────────────────────────────
-if ! command -v "$PYTHON" &>/dev/null; then
-  echo "ERROR: python3 is required."
-  exit 1
-fi
-
-if ! "$PYTHON" -c "import gi" &>/dev/null; then
+if ! "$PYTHON" -c "import gi" &>/dev/null 2>&1; then
   echo "==> Installing python3-gi (PyGObject) …"
   if command -v pacman &>/dev/null; then
     sudo pacman -S --noconfirm python-gobject gtk3 libayatana-appindicator
@@ -49,51 +43,49 @@ if ! "$PYTHON" -c "import gi" &>/dev/null; then
   fi
 fi
 
-if ! "$PYTHON" -c "import PyInstaller" &>/dev/null 2>&1; then
-  echo "==> Creating build venv with system packages …"
-  "$PYTHON" -m venv --system-site-packages "$SCRIPT_DIR/.build-venv"
-  "$SCRIPT_DIR/.build-venv/bin/pip" install --quiet pyinstaller pyinstaller-hooks-contrib
+# ── Install app files ─────────────────────────────────────────────────────────
+echo "==> Installing susops-tray …"
+
+install -Dm755 "$SCRIPT_DIR/susops_tray.py"      "$APP_DATA/susops_tray.py"
+install -Dm755 "$SCRIPT_DIR/susops-cli/susops.sh" "$APP_DATA/susops.sh"
+cp -r "$SCRIPT_DIR/icons" "$APP_DATA/icons"
+echo "    script  → $APP_DATA/susops_tray.py"
+
+if [[ -f "$SCRIPT_DIR/susops-cli/icon.png" ]]; then
+  install -Dm644 "$SCRIPT_DIR/susops-cli/icon.png" "$ICON_DST"
+  gtk-update-icon-cache -f -t "$(dirname "$(dirname "$(dirname "$ICON_DST")")")" 2>/dev/null || true
+  echo "    icon    → $ICON_DST"
 fi
 
-PYINSTALLER="$SCRIPT_DIR/.build-venv/bin/pyinstaller"
-if [[ ! -f "$PYINSTALLER" ]]; then
-  PYINSTALLER="$SCRIPT_DIR/.build-venv/bin/pyinstaller"
-fi
+# ── Create launcher script ────────────────────────────────────────────────────
+mkdir -p "$(dirname "$INSTALL_BIN")"
+cat > "$INSTALL_BIN" << EOF
+#!/usr/bin/env bash
+exec $PYTHON $APP_DATA/susops_tray.py "\$@"
+EOF
+chmod +x "$INSTALL_BIN"
+echo "    binary  → $INSTALL_BIN"
 
-# ── Build ─────────────────────────────────────────────────────────────────────
-echo "==> Building susops-tray binary …"
-cd "$SCRIPT_DIR"
-"$SCRIPT_DIR/.build-venv/bin/python" -m PyInstaller --clean --noconfirm susops-tray.spec
+# ── Desktop entry ─────────────────────────────────────────────────────────────
+mkdir -p "$(dirname "$DESKTOP_DST")"
+sed "s|^Exec=.*|Exec=$INSTALL_BIN|" "$SCRIPT_DIR/susops-tray.desktop" > "$DESKTOP_DST"
+echo "    desktop → $DESKTOP_DST"
 
-echo
-echo "==> Build complete: $BINARY"
-
-# ── Install ───────────────────────────────────────────────────────────────────
-if [[ "$ACTION" == "--install" ]]; then
-  echo "==> Installing …"
-
-  install -Dm755 "$BINARY" "$INSTALL_BIN"
-  echo "    binary  → $INSTALL_BIN"
-
-  if [[ -f "$ICON_SRC" ]]; then
-    install -Dm644 "$ICON_SRC" "$ICON_DST"
-    gtk-update-icon-cache -f -t "$(dirname "$(dirname "$(dirname "$ICON_DST")")")" 2>/dev/null || true
-    echo "    icon    → $ICON_DST"
-  fi
-
-  # Update desktop file Exec path and install
-  mkdir -p "$(dirname "$DESKTOP_DST")"
-  sed "s|^Exec=.*|Exec=$INSTALL_BIN|" "$DESKTOP_SRC" > "$DESKTOP_DST"
-  echo "    desktop → $DESKTOP_DST"
-
+# ── Autostart ─────────────────────────────────────────────────────────────────
+AUTOSTART_FILE="$HOME/.config/autostart/susops-tray.desktop"
+if [[ ! -f "$AUTOSTART_FILE" ]]; then
   echo
   read -rp "Add SusOps to autostart? [y/N] " yn
   if [[ "${yn,,}" == "y" ]]; then
     mkdir -p "$HOME/.config/autostart"
-    cp "$DESKTOP_DST" "$HOME/.config/autostart/susops-tray.desktop"
+    cp "$DESKTOP_DST" "$AUTOSTART_FILE"
     echo "    autostart entry created."
   fi
+fi
 
-  echo
-  echo "==> Run with:  susops-tray"
+echo
+echo "==> Done. Run with:  susops-tray"
+
+if [[ "$ACTION" == "--run" ]]; then
+  exec "$INSTALL_BIN"
 fi
