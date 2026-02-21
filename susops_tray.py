@@ -552,8 +552,11 @@ class AddConnectionDialog(Gtk.Dialog):
         self.set_default_response(Gtk.ResponseType.OK)
 
         self._tag  = Gtk.Entry(activates_default=True)
-        self._host = _entry_with_completion(get_ssh_hosts())
-        self._host.set_activates_default(True)
+        self._host = Gtk.ComboBoxText(has_entry=True)
+        for h in get_ssh_hosts():
+            self._host.append_text(h)
+        self._host.get_child().set_placeholder_text('hostname, IP, or SSH alias')
+        self._host.get_child().set_activates_default(True)
         self._port = Gtk.Entry(placeholder_text='auto if blank', activates_default=True)
 
         grid, _ = _labeled_grid([
@@ -572,7 +575,7 @@ class AddConnectionDialog(Gtk.Dialog):
                 self.hide(); return
 
             tag  = self._tag.get_text().strip()
-            host = self._host.get_text().strip()
+            host = (self._host.get_active_text() or '').strip()
             port = self._port.get_text().strip()
 
             if not tag:
@@ -600,7 +603,7 @@ class AddConnectionDialog(Gtk.Dialog):
             _alert(self._app._root, 'Connection Added', out)
         else:
             _alert(self._app._root, 'Error', out, Gtk.MessageType.ERROR)
-        self._tag.set_text(''); self._host.set_text(''); self._port.set_text('')
+        self._tag.set_text(''); self._host.get_child().set_text(''); self._port.set_text('')
 
 
 # ── Add Domain / IP / CIDR dialog ─────────────────────────────────────────────
@@ -1384,6 +1387,7 @@ class SusOpsApp:
         tv.get_buffer().set_text(content)
         sw.add(tv)
         dlg.get_content_area().add(sw)
+        _polish_dialog(dlg)
         dlg.show_all()
 
     # ── Proxy controls ────────────────────────────────────────────────────────
