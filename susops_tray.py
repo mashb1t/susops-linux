@@ -957,15 +957,19 @@ class SusOpsApp:
         return LogoStyle[self.config.get('logo_style', DEFAULT_LOGO_STYLE.value)]
 
     def _setup_indicator(self):
-        icon = _state_icon_path(ProcessState.STOPPED.icon_name, self._current_logo_style()) or ICON_PATH or 'network-vpn'
+        icon_path = _state_icon_path(ProcessState.STOPPED.icon_name, self._current_logo_style())
         if _INDICATOR_BACKEND:
+            if icon_path and os.path.exists(icon_path):
+                initial_icon = os.path.splitext(os.path.basename(icon_path))[0]
+                icon_dir = os.path.dirname(icon_path)
+            else:
+                initial_icon = ICON_PATH or 'network-vpn'
+                icon_dir = None
             self._indicator = _AI3.Indicator.new(
-                'org.susops.App', icon,
+                'org.susops.App', initial_icon,
                 _AI3.IndicatorCategory.APPLICATION_STATUS)
-            # Tell AppIndicator where to find our per-state PNG files
-            cache_dir = os.path.expanduser('~/.cache/susops/icons')
-            if os.path.isdir(cache_dir):
-                self._indicator.set_icon_theme_path(cache_dir)
+            if icon_dir and os.path.isdir(icon_dir):
+                self._indicator.set_icon_theme_path(icon_dir)
             self._indicator.set_status(_AI3.IndicatorStatus.ACTIVE)
             self._indicator.set_menu(self._menu)
         else:
