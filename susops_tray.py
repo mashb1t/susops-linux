@@ -322,11 +322,14 @@ def is_valid_port(value: str) -> bool:
 # ── GTK helpers ───────────────────────────────────────────────────────────────
 def _polish_dialog(dlg: Gtk.Dialog) -> None:
     """Apply consistent margins and spacing to a dialog's action area."""
-    aa = dlg.get_action_area()
-    aa.set_margin_start(12)
-    aa.set_margin_end(12)
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', DeprecationWarning)
+        aa = dlg.get_action_area()
+    aa.set_margin_start(16)
+    aa.set_margin_end(16)
     aa.set_margin_top(8)
-    aa.set_margin_bottom(12)
+    aa.set_margin_bottom(16)
     aa.set_spacing(6)
 
 
