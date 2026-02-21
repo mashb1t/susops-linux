@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=SusOps
+Comment=SSH tunnelling and SOCKS5 proxy management
+Exec=susops-tray
+Icon=org.susops.App
+Type=Application
+Categories=Network;Utility;
+Keywords=SSH;SOCKS;proxy;tunnel;VPN;
+StartupNotify=false
+# Autostart: copy to ~/.config/autostart/ to launch on login
+X-GNOME-Autostart-enabled=true

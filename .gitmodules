@@ -1,3 +1,6 @@
 [submodule "susops-cli"]
 	path = susops-cli
 	url = git@github.com:mashb1t/susops-cli.git
+[submodule "susops-mac"]
+	path = susops-mac
+	url = git@github.com:mashb1t/susops-mac.git

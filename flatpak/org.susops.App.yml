@@ -1,0 +1,84 @@
+app-id: org.susops.App
+runtime: org.gnome.Platform
+runtime-version: '47'
+sdk: org.gnome.Sdk
+command: susops-tray
+
+finish-args:
+  # Display
+  - --socket=fallback-x11
+  - --socket=wayland
+  - --share=ipc
+  # Network (for proxy connectivity tests)
+  - --share=network
+  # Run susops commands on the host via flatpak-spawn
+  - --talk-name=org.freedesktop.Flatpak
+  # System tray / StatusNotifierItem (KDE, XFCE, etc.)
+  - --talk-name=org.kde.StatusNotifierWatcher
+  - --talk-name=com.canonical.AppMenu.Registrar
+  - --talk-name=com.canonical.indicator.application
+  # Read ~/.susops/config.yaml and the user's shell rc files
+  - --filesystem=home:ro
+  # xdg-open for opening config files
+  - --talk-name=org.freedesktop.portal.Desktop
+
+modules:
+  # ── libdbusmenu (required by libayatana-appindicator) ───────────────────────
+  - name: libdbusmenu
+    buildsystem: autotools
+    build-options:
+      cflags: -Wno-error
+      env:
+        HAVE_VALGRIND: '0'
+    config-opts:
+      - --with-gtk=3
+      - --disable-dumper
+      - --disable-static
+      - --disable-tests
+      - --disable-gtk-doc
+      - --disable-vala
+      - --enable-introspection=yes
+    sources:
+      - type: archive
+        url: https://launchpad.net/dbusmenu/trunk/16.04.0/+download/libdbusmenu-16.04.0.tar.gz
+        sha256: b9cc4a2acd74509435892823607d966d424bd9ad5d0b00938f27240a1bfa878a
+        x-checker-data:
+          type: anitya
+          project-id: 10-1
+          stable-only: true
+
+  # ── libayatana-ido (optional widgets for indicators) ────────────────────────
+  - name: libayatana-ido
+    buildsystem: cmake-ninja
+    sources:
+      - type: git
+        url: https://github.com/AyatanaIndicators/libayatana-ido.git
+        tag: '0.10.1'
+
+  # ── libayatana-appindicator (system tray indicator) ─────────────────────────
+  - name: libayatana-appindicator
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DENABLE_BINDINGS_MONO=NO
+      - -DENABLE_BINDINGS_VALA=NO
+    sources:
+      - type: git
+        url: https://github.com/AyatanaIndicators/libayatana-appindicator.git
+        tag: '0.5.93'
+
+  # ── SusOps tray app ──────────────────────────────────────────────────────────
+  - name: susops-tray
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 susops_tray.py /app/bin/susops-tray
+      - install -Dm755 susops.sh /app/share/susops/susops.sh
+      - install -Dm644 org.susops.App.desktop /app/share/applications/org.susops.App.desktop
+      - install -Dm644 org.susops.App.metainfo.xml /app/share/metainfo/org.susops.App.metainfo.xml
+      - install -Dm644 icon.png /app/share/icons/hicolor/128x128/apps/org.susops.App.png
+    sources:
+      - type: dir
+        path: .
+      - type: file
+        path: ../susops-cli/icon.png
+      - type: file
+        path: ../susops-cli/susops.sh
