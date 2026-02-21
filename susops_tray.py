@@ -21,6 +21,15 @@ try:
     gi.require_version('AyatanaAppIndicator3', '0.1')
     from gi.repository import AyatanaAppIndicator3 as _AI3
     _INDICATOR_BACKEND = 'ayatana'
+    # Silence the upstream deprecation notice — the migration to
+    # libayatana-appindicator-glib requires a full menu rewrite (GMenu/GAction)
+    # and is not yet warranted.
+    from gi.repository import GLib as _GLib
+    _GLib.log_set_handler(
+        'libayatana-appindicator',
+        _GLib.LogLevelFlags.LEVEL_WARNING,
+        lambda *_: None,
+    )
 except (ValueError, ImportError):
     try:
         gi.require_version('AppIndicator3', '0.1')
@@ -311,12 +320,23 @@ def is_valid_port(value: str) -> bool:
 
 
 # ── GTK helpers ───────────────────────────────────────────────────────────────
+def _polish_dialog(dlg: Gtk.Dialog) -> None:
+    """Apply consistent margins and spacing to a dialog's action area."""
+    aa = dlg.get_action_area()
+    aa.set_margin_start(12)
+    aa.set_margin_end(12)
+    aa.set_margin_top(8)
+    aa.set_margin_bottom(12)
+    aa.set_spacing(6)
+
+
 def _alert(parent, title: str, body: str = '', msg_type=Gtk.MessageType.INFO):
     dlg = Gtk.MessageDialog(transient_for=parent, modal=True,
                             message_type=msg_type,
                             buttons=Gtk.ButtonsType.CLOSE, text=title)
     if body:
         dlg.format_secondary_text(body)
+    _polish_dialog(dlg)
     dlg.run(); dlg.destroy()
 
 
@@ -329,6 +349,7 @@ def _confirm(parent, title: str, body: str = '', ok_label='OK') -> bool:
     dlg.add_buttons('_Cancel', Gtk.ResponseType.CANCEL,
                     ok_label, Gtk.ResponseType.OK)
     dlg.set_default_response(Gtk.ResponseType.OK)
+    _polish_dialog(dlg)
     resp = dlg.run(); dlg.destroy()
     return resp == Gtk.ResponseType.OK
 
@@ -362,7 +383,7 @@ def _labeled_grid(fields: list) -> tuple[Gtk.Grid, dict]:
     """
     grid = Gtk.Grid(column_spacing=12, row_spacing=8,
                     margin_start=16, margin_end=16,
-                    margin_top=16, margin_bottom=8)
+                    margin_top=16, margin_bottom=16)
     widgets = {}
     for row, (key, label, widget) in enumerate(fields):
         lbl = Gtk.Label(label=label, xalign=1.0)
@@ -390,8 +411,6 @@ class SettingsDialog(Gtk.Dialog):
         super().__init__(title='Settings', transient_for=parent, modal=True)
         self._app = app
         self.set_default_size(360, -1)
-        self.set_border_width(0)
-
         self.add_buttons('_Cancel', Gtk.ResponseType.CANCEL,
                          '_Save',   Gtk.ResponseType.OK)
         self.set_default_response(Gtk.ResponseType.OK)
@@ -400,7 +419,7 @@ class SettingsDialog(Gtk.Dialog):
 
         grid = Gtk.Grid(column_spacing=12, row_spacing=10,
                         margin_start=16, margin_end=16,
-                        margin_top=16, margin_bottom=8)
+                        margin_top=16, margin_bottom=16)
         box.add(grid)
 
         row = 0
@@ -454,6 +473,7 @@ class SettingsDialog(Gtk.Dialog):
         self._pac_port.set_placeholder_text('auto (0)')
         grid.attach(self._pac_port, 1, row, 1, 1)
 
+        _polish_dialog(self)
         self.show_all()
 
     def _on_logo_style_changed(self, combo):
@@ -537,6 +557,7 @@ class AddConnectionDialog(Gtk.Dialog):
             ('port', 'SOCKS Proxy Port (optional):', self._port),
         ])
         self.get_content_area().add(grid)
+        _polish_dialog(self)
         self.show_all()
 
     def run(self):
@@ -602,9 +623,10 @@ class AddHostDialog(Gtk.Dialog):
             label='Host can be:\n'
                   '  • Domain  (subdomains & wildcards supported)\n'
                   '  • IP address  (CIDR notation supported)',
-            xalign=0, margin_start=16, margin_bottom=12)
+            xalign=0, margin_start=16, margin_top=4, margin_bottom=16)
         info.get_style_context().add_class('dim-label')
         box.add(info)
+        _polish_dialog(self)
         self.show_all()
 
     def run(self):
@@ -668,6 +690,7 @@ class AddLocalForwardDialog(Gtk.Dialog):
             ('raddr',  'Remote Bind (optional):',  self._remote_addr),
         ])
         self.get_content_area().add(grid)
+        _polish_dialog(self)
         self.show_all()
 
     def run(self):
@@ -734,6 +757,7 @@ class AddRemoteForwardDialog(Gtk.Dialog):
             ('laddr',  'Local Bind (optional):',   self._local_addr),
         ])
         self.get_content_area().add(grid)
+        _polish_dialog(self)
         self.show_all()
 
     def run(self):
@@ -787,6 +811,7 @@ class _RemoveDialog(Gtk.Dialog):
         self._combo = Gtk.ComboBoxText(hexpand=True)
         grid, _ = _labeled_grid([(label, label + ':', self._combo)])
         self.get_content_area().add(grid)
+        _polish_dialog(self)
         self.show_all()
 
     def _refresh(self, items: list[str]):
@@ -892,6 +917,7 @@ class AboutDialog(Gtk.Dialog):
         copy_lbl.get_style_context().add_class('dim-label')
         vbox.pack_start(copy_lbl, False, False, 4)
 
+        _polish_dialog(self)
         self.show_all()
 
     def run(self):
