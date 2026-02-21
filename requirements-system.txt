@@ -1,0 +1,40 @@
+# System-level dependencies (not managed by uv/pip)
+# Install via your distro's package manager before running susops-linux.
+
+# Arch Linux
+#   sudo pacman -S go-yq autossh openbsd-netcat gtk3 libayatana-appindicator python-gobject
+
+# Debian / Ubuntu
+#   sudo apt install golang-github-mikefarah-yq autossh netcat-openbsd libgtk-3-0 libayatana-appindicator3-dev python3-gi
+
+# ── Required tools ────────────────────────────────────────────────────────────
+
+# go-yq (Mike Farah's yq v4) — YAML processor used by susops-cli
+# IMPORTANT: must be yq v4 (go-yq), NOT the Python-based yq (kislyuk)
+# Arch: go-yq  |  other: https://github.com/mikefarah/yq
+yq>=4.0.0
+
+# autossh — keeps SSH SOCKS5 tunnels alive after disconnects
+# Arch: autossh
+autossh
+
+# netcat (nc) — used by susops-cli to serve the PAC file over HTTP
+# Arch: openbsd-netcat  |  Debian: netcat-openbsd  |  or ncat (nmap)
+nc
+
+# ── Required GTK libraries ────────────────────────────────────────────────────
+
+# GTK3 — GUI toolkit
+# Arch: gtk3
+gtk3>=3.24
+
+# AyatanaAppIndicator3 or AppIndicator3 — system tray support
+# Arch: libayatana-appindicator  |  Debian: libayatana-appindicator3-dev
+libayatana-appindicator3  # fallback: libappindicator3
+
+# ── Python bindings (also listed in pyproject.toml for uv) ───────────────────
+
+# PyGObject — Python bindings for GTK3 / GLib / GdkPixbuf / Pango
+# System package preferred on most distros (already compiled against system GTK)
+# Arch: python-gobject  |  pip: PyGObject>=3.50.0
+PyGObject>=3.50.0

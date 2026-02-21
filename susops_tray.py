@@ -42,6 +42,7 @@ SUSOPS_SH = next(
     (os.path.realpath(p) for p in [
         os.path.join(_bundle, 'susops.sh') if _bundle else None,
         os.path.join(_here, '..', 'susops-cli', 'susops.sh'),
+        '/usr/lib/susops/susops.sh',
         '/app/share/susops/susops.sh',
         os.path.expanduser('~/.local/share/susops/susops.sh'),
     ] if p and os.path.exists(p)),
@@ -84,18 +85,25 @@ def _is_dark_theme() -> bool:
     except Exception:
         return False
 
-def _state_icon_path(state_name: str) -> str:
+def _state_icon_path(state_name: str, logo_style=None) -> str:
     """Return absolute path to the PNG (converted from SVG) for the given state name."""
     if not _ICONS_DIR:
         return ICON_PATH
     variant = 'light' if _is_dark_theme() else 'dark'
-    svg = os.path.join(_ICONS_DIR, 'colored_glasses', variant, f'{state_name}.svg')
+    # Resolve logo style — fall back to default if not set or icons missing
+    style = logo_style if logo_style is not None else DEFAULT_LOGO_STYLE
+    style_name = style.dir_name
+    svg = os.path.join(_ICONS_DIR, style_name, variant, f'{state_name}.svg')
     if not os.path.exists(svg):
-        return ICON_PATH
+        # Fall back to colored_glasses
+        style_name = DEFAULT_LOGO_STYLE.dir_name
+        svg = os.path.join(_ICONS_DIR, style_name, variant, f'{state_name}.svg')
+        if not os.path.exists(svg):
+            return ICON_PATH
     # Convert SVG → PNG into a per-user cache dir (22 px — standard tray size)
     cache_dir = os.path.expanduser('~/.cache/susops/icons')
     os.makedirs(cache_dir, exist_ok=True)
-    png = os.path.join(cache_dir, f'{state_name}_{variant}.png')
+    png = os.path.join(cache_dir, f'{style_name}_{state_name}_{variant}.png')
     if not os.path.exists(png):
         try:
             pb = GdkPixbuf.Pixbuf.new_from_file_at_size(svg, 22, 22)
@@ -104,7 +112,7 @@ def _state_icon_path(state_name: str) -> str:
             return ICON_PATH
     return png
 
-VERSION = '1.0.0'
+from version import VERSION
 BIND_ADDRESSES = ['localhost', '172.17.0.1', '0.0.0.0']
 
 
@@ -122,6 +130,23 @@ class ProcessState(Enum):
     def dot(self):      return self.value[1]
     @property
     def icon_name(self): return self.value[2]
+
+
+class LogoStyle(Enum):
+    GEAR            = 'GEAR'
+    COLORED_GLASSES = 'COLORED_GLASSES'
+    COLORED_S       = 'COLORED_S'
+
+    @property
+    def dir_name(self) -> str:
+        return self.value.lower()
+
+    @property
+    def display_name(self) -> str:
+        return self.value.replace('_', ' ').title()
+
+
+DEFAULT_LOGO_STYLE = LogoStyle.COLORED_GLASSES
 
 
 # ── Config helper (direct yq access, mirrors macOS ConfigHelper) ──────────────
@@ -173,10 +198,14 @@ class ConfigHelper:
 
     @staticmethod
     def load_app_config() -> dict:
+        logo_style_raw = ConfigHelper.read('.susops_app.logo_style', DEFAULT_LOGO_STYLE.value)
+        if logo_style_raw.upper() not in LogoStyle.__members__:
+            logo_style_raw = DEFAULT_LOGO_STYLE.value
         return {
             'pac_server_port':  ConfigHelper.read('.pac_server_port', '0'),
             'stop_on_quit':     ConfigHelper.read('.susops_app.stop_on_quit', '1') == '1',
             'ephemeral_ports':  ConfigHelper.read('.susops_app.ephemeral_ports', '1') == '1',
+            'logo_style':       logo_style_raw.upper(),
         }
 
 
@@ -403,6 +432,18 @@ class SettingsDialog(Gtk.Dialog):
         grid.attach(self._ephemeral, 1, row, 1, 1)
         row += 1
 
+        # Logo Style
+        lbl = Gtk.Label(label='Logo Style:', xalign=1.0)
+        lbl.set_width_chars(24)
+        grid.attach(lbl, 0, row, 1, 1)
+        self._logo_style = Gtk.ComboBoxText(halign=Gtk.Align.START)
+        for style in LogoStyle:
+            self._logo_style.append(style.value, style.display_name)
+        self._logo_style.set_active_id(app.config.get('logo_style', DEFAULT_LOGO_STYLE.value))
+        self._logo_style.connect('changed', self._on_logo_style_changed)
+        grid.attach(self._logo_style, 1, row, 1, 1)
+        row += 1
+
         # PAC Server Port
         lbl = Gtk.Label(label='PAC Server Port:', xalign=1.0)
         lbl.set_width_chars(24)
@@ -415,11 +456,21 @@ class SettingsDialog(Gtk.Dialog):
 
         self.show_all()
 
+    def _on_logo_style_changed(self, combo):
+        """Live-preview the selected icon style in the tray."""
+        style_id = combo.get_active_id()
+        if style_id and style_id in LogoStyle.__members__:
+            self._app.config['logo_style'] = style_id
+            self._app._update_tray_icon(self._app._state)
+
     def run(self) -> bool:
         """Show dialog, save on OK. Returns True if saved."""
         while True:
             resp = super().run()
             if resp != Gtk.ResponseType.OK:
+                # Revert any live-preview changes
+                self._app.config = ConfigHelper.load_app_config()
+                self._app._update_tray_icon(self._app._state)
                 self.hide()
                 return False
 
@@ -435,6 +486,8 @@ class SettingsDialog(Gtk.Dialog):
             ConfigHelper.write(f'.susops_app.stop_on_quit = "{stop}"')
             eph = '1' if self._ephemeral.get_active() else '0'
             ConfigHelper.write(f'.susops_app.ephemeral_ports = "{eph}"')
+            logo = self._logo_style.get_active_id() or DEFAULT_LOGO_STYLE.value
+            ConfigHelper.write(f'.susops_app.logo_style = "{logo}"')
 
             # Autostart
             self._apply_autostart(self._launch_at_login.get_active())
@@ -874,8 +927,11 @@ class SusOpsApp:
 
     # ── Indicator setup ───────────────────────────────────────────────────────
 
+    def _current_logo_style(self) -> LogoStyle:
+        return LogoStyle[self.config.get('logo_style', DEFAULT_LOGO_STYLE.value)]
+
     def _setup_indicator(self):
-        icon = _state_icon_path(ProcessState.STOPPED.icon_name) or ICON_PATH or 'network-vpn'
+        icon = _state_icon_path(ProcessState.STOPPED.icon_name, self._current_logo_style()) or ICON_PATH or 'network-vpn'
         if _INDICATOR_BACKEND:
             self._indicator = _AI3.Indicator.new(
                 'org.susops.App', icon,
@@ -895,7 +951,7 @@ class SusOpsApp:
 
     def _update_tray_icon(self, state: 'ProcessState'):
         try:
-            icon_path = _state_icon_path(state.icon_name)
+            icon_path = _state_icon_path(state.icon_name, self._current_logo_style())
             if _INDICATOR_BACKEND:
                 if icon_path and os.path.exists(icon_path):
                     # AppIndicator needs icon name (no path, no extension) + theme path set
@@ -910,7 +966,7 @@ class SusOpsApp:
             pass
 
     def _update_status_icon(self, state: 'ProcessState'):
-        icon = _state_icon_path(state.icon_name)
+        icon = _state_icon_path(state.icon_name, self._current_logo_style())
         if icon and os.path.exists(icon):
             self._si.set_from_file(icon)
         elif os.path.exists(ICON_PATH):
@@ -1219,6 +1275,8 @@ class SusOpsApp:
             pac = self.config.get('pac_server_port', '0')
             self._dlg_settings._pac_port.set_text(pac if pac != '0' else '')
             self._dlg_settings._launch_at_login.set_active(os.path.exists(AUTOSTART_FILE))
+            self._dlg_settings._logo_style.set_active_id(
+                self.config.get('logo_style', DEFAULT_LOGO_STYLE.value))
 
         if self._dlg_settings.run():
             self.config = ConfigHelper.load_app_config()
