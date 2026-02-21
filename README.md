@@ -53,7 +53,7 @@ yay -S susops
 ```
 
 ### All other distros
-####1. Clone with submodule
+#### 1. Clone with submodule
 
 ```bash
 git clone --recursive https://github.com/mashb1t/susops-linux.git
@@ -83,7 +83,7 @@ To uninstall:
 ./build.sh --uninstall
 ```
 
-### 4. Configure
+#### 3. Configure
 
 1. Launch the application (`susops`)
 2. Set up your SSH host and ports in the **Settings** menu
