@@ -13,7 +13,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional
 
-from gi.repository import Gtk, GLib, GdkPixbuf, Pango
+from gi.repository import Gtk, GLib, Gdk, GdkPixbuf, Pango
 
 # ── AppIndicator detection ────────────────────────────────────────────────────
 _INDICATOR_BACKEND = None
@@ -31,7 +31,6 @@ except (ValueError, ImportError):
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 import sys
-IS_FLATPAK   = os.path.exists('/run/host/usr')
 _here        = os.path.dirname(os.path.abspath(__file__))
 _bundle      = getattr(sys, '_MEIPASS', None)  # set by PyInstaller at runtime
 WORKSPACE    = os.path.expanduser('~/.susops')
@@ -89,7 +88,7 @@ def _state_icon_path(state_name: str) -> str:
     """Return absolute path to the PNG (converted from SVG) for the given state name."""
     if not _ICONS_DIR:
         return ICON_PATH
-    variant = 'dark' if _is_dark_theme() else 'light'
+    variant = 'light' if _is_dark_theme() else 'dark'
     svg = os.path.join(_ICONS_DIR, 'colored_glasses', variant, f'{state_name}.svg')
     if not os.path.exists(svg):
         return ICON_PATH
@@ -111,16 +110,16 @@ BIND_ADDRESSES = ['localhost', '172.17.0.1', '0.0.0.0']
 
 # ── Enums ─────────────────────────────────────────────────────────────────────
 class ProcessState(Enum):
-    INITIAL           = ('initial',           '#888888', 'stopped')
-    RUNNING           = ('running',           '#33cc33', 'running')
-    STOPPED_PARTIALLY = ('stopped partially', '#ff9900', 'stopped_partially')
-    STOPPED           = ('stopped',           '#888888', 'stopped')
-    ERROR             = ('error',             '#cc3333', 'error')
+    INITIAL           = ('initial',           '⚫', 'stopped')
+    RUNNING           = ('running',           '🟢', 'running')
+    STOPPED_PARTIALLY = ('stopped partially', '🟠', 'stopped_partially')
+    STOPPED           = ('stopped',           '⚫', 'stopped')
+    ERROR             = ('error',             '🔴', 'error')
 
     @property
     def label(self):    return self.value[0]
     @property
-    def color(self):    return self.value[1]
+    def dot(self):      return self.value[1]
     @property
     def icon_name(self): return self.value[2]
 
@@ -205,7 +204,7 @@ _BROWSER_DEFS = [
     # (display_name, executables, chromium_based, has_proxy_settings)
     ('Chrome',   ['google-chrome', 'google-chrome-stable'],           True,  True),
     ('Chromium', ['chromium', 'chromium-browser'],                    True,  True),
-    ('Brave',    ['brave-browser', 'brave', 'brave-browser-stable'],  True,  False),
+    ('Brave',    ['brave-browser', 'brave', 'brave-browser-stable'],  True,  True),
     ('Vivaldi',  ['vivaldi', 'vivaldi-stable'],                       True,  False),
     ('Opera',    ['opera'],                                           True,  False),
     ('Edge',     ['microsoft-edge', 'microsoft-edge-stable'],         True,  False),
@@ -237,8 +236,7 @@ def _build_cmd(susops_args: str) -> list[str]:
         cmd = [SUSOPS_SH] + susops_args.split()
     else:
         cmd = ['susops'] + susops_args.split()
-    if IS_FLATPAK:
-        return ['flatpak-spawn', '--host'] + cmd
+
     return cmd
 
 
@@ -266,20 +264,14 @@ def run_async(susops_args: str, callback, timeout: int = 30):
 
 def open_path(path: str):
     try:
-        if IS_FLATPAK:
-            subprocess.Popen(['flatpak-spawn', '--host', 'xdg-open', path])
-        else:
-            subprocess.Popen(['xdg-open', path])
+        subprocess.Popen(['xdg-open', path])
     except Exception:
         pass
 
 
 def launch_browser(exe: str, args: list[str]):
     try:
-        if IS_FLATPAK:
-            subprocess.Popen(['flatpak-spawn', '--host', exe] + args)
-        else:
-            subprocess.Popen([exe] + args)
+        subprocess.Popen([exe] + args)
     except FileNotFoundError as exc:
         raise RuntimeError(str(exc))
 
@@ -453,10 +445,7 @@ class SettingsDialog(Gtk.Dialog):
     def _apply_autostart(self, enable: bool):
         if enable:
             os.makedirs(AUTOSTART_DIR, exist_ok=True)
-            if IS_FLATPAK:
-                exec_line = 'Exec=flatpak run org.susops.App'
-            else:
-                exec_line = f'Exec=python3 {os.path.abspath(__file__)}'
+            exec_line = f'Exec=python3 {os.path.abspath(__file__)}'
             content = (
                 '[Desktop Entry]\n'
                 'Name=SusOps\n'
@@ -936,12 +925,11 @@ class SusOpsApp:
 
         # ── Status row ────────────────────────────────────────────────────────
         self._status_item = Gtk.MenuItem()
-        hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, margin_start=4)
-        self._status_dot   = Gtk.Label()
-        self._status_label = Gtk.Label(label='Status: checking…')
-        hbox.pack_start(self._status_dot,   False, False, 0)
-        hbox.pack_start(self._status_label, False, False, 0)
-        self._status_item.add(hbox)
+        self._status_label = Gtk.Label()
+        self._status_label.set_halign(Gtk.Align.START)
+        self._status_label.set_use_markup(True)
+        self._status_label.set_markup(f'{ProcessState.INITIAL.dot} <b>Status:</b> checking…')
+        self._status_item.add(self._status_label)
         self._status_item.connect('activate', self._on_check_status)
         m.append(self._status_item)
         m.append(Gtk.SeparatorMenuItem())
@@ -1082,10 +1070,36 @@ class SusOpsApp:
 
     def _make_chromium_settings(self, b: dict):
         def handler(_item):
+            url = 'chrome://net-internals/#proxy'
             try:
-                launch_browser(b['exe'], ['chrome://net-internals/#proxy'])
-            except RuntimeError as exc:
-                _alert(self._root, 'Launch Failed', str(exc), Gtk.MessageType.ERROR)
+                launch_browser(b['exe'], [])
+            except RuntimeError:
+                pass
+            # Show URL in a selectable entry — user presses Ctrl+C to copy
+            dlg = Gtk.Dialog(title='Open Proxy Settings',
+                             transient_for=self._root, modal=True)
+            dlg.add_button('_OK', Gtk.ResponseType.OK)
+            dlg.set_default_response(Gtk.ResponseType.OK)
+            box = dlg.get_content_area()
+            box.set_spacing(8)
+            box.set_margin_start(16); box.set_margin_end(16)
+            box.set_margin_top(12);  box.set_margin_bottom(8)
+            box.add(Gtk.Label(
+                label='Paste this URL into the browser address bar:',
+                xalign=0.0))
+            tv = Gtk.TextView()
+            tv.get_buffer().set_text(url)
+            tv.set_wrap_mode(Gtk.WrapMode.NONE)
+            tv.set_monospace(True)
+            tv.set_hexpand(True)
+            box.add(tv)
+            dlg.show_all()
+            # Select all so Ctrl+C copies immediately
+            buf = tv.get_buffer()
+            buf.select_range(buf.get_start_iter(), buf.get_end_iter())
+            tv.grab_focus()
+            dlg.run()
+            dlg.destroy()
         return handler
 
     def _make_firefox_launch(self, b: dict):
@@ -1142,12 +1156,9 @@ class SusOpsApp:
         if new_state == self._state:
             return
 
-        # Update status dot + label
-        color = new_state.color
-        self._status_dot.set_markup(
-            f'<span foreground="{color}" size="large">●</span>')
+        # Update status dot (emoji, immune to theme override) + label text
         self._status_label.set_markup(
-            f'<b>Status:</b> {new_state.label}')
+            f'{new_state.dot} <b>Status:</b> {new_state.label}')
         self._status_item.show_all()
 
         # Update tray icon (wrapped in try/except inside _update_tray_icon)
@@ -1286,19 +1297,19 @@ class SusOpsApp:
 
     def _on_start(self, _):
         self._start_item.set_sensitive(False)
-        self._status_label.set_text('Status: starting…')
+        self._status_label.set_markup(f'{ProcessState.INITIAL.dot} <b>Status:</b> starting…')
         run_async('start', self._after_proxy_cmd, timeout=60)
 
     def _on_stop(self, _):
         self._stop_item.set_sensitive(False)
-        self._status_label.set_text('Status: stopping…')
+        self._status_label.set_markup(f'{ProcessState.INITIAL.dot} <b>Status:</b> stopping…')
         keep = '--keep-ports' if not self.config.get('ephemeral_ports', True) else ''
         run_async(f'stop {keep}'.strip(), self._after_proxy_cmd, timeout=30)
 
     def _on_restart(self, _):
         self.config = ConfigHelper.load_app_config()
         self._restart_item.set_sensitive(False)
-        self._status_label.set_text('Status: restarting…')
+        self._status_label.set_markup(f'{ProcessState.INITIAL.dot} <b>Status:</b> restarting…')
         run_async('restart', self._after_proxy_cmd, timeout=60)
 
     def _after_proxy_cmd(self, out: str, rc: int):
