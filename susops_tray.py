@@ -13,7 +13,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional
 
-from gi.repository import Gtk, GLib, Gdk, GdkPixbuf, Pango
+from gi.repository import (Gtk, GLib, Gdk, GdkPixbuf, Pango, Gio)
 
 # ── AppIndicator detection ────────────────────────────────────────────────────
 _INDICATOR_BACKEND = None
@@ -1467,7 +1467,20 @@ class SusOpsApp:
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
+def _apply_color_scheme(*_args):
+    """Sync gtk-application-prefer-dark-theme with the OS color scheme."""
+    Gtk.Settings.get_default().set_property(
+        'gtk-application-prefer-dark-theme', _is_dark_theme())
+
+
 def main():
+    _apply_color_scheme()
+    try:
+        _gset = Gio.Settings.new('org.gnome.desktop.interface')
+        _gset.connect('changed::color-scheme', _apply_color_scheme)
+        _gset.connect('changed::gtk-theme', _apply_color_scheme)
+    except Exception:
+        pass
     SusOpsApp()
     Gtk.main()
 
