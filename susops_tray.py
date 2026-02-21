@@ -31,8 +31,10 @@ except (ValueError, ImportError):
         _AI3 = None
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
+import sys
 IS_FLATPAK   = os.path.exists('/run/host/usr')
 _here        = os.path.dirname(os.path.abspath(__file__))
+_bundle      = getattr(sys, '_MEIPASS', None)  # set by PyInstaller at runtime
 WORKSPACE    = os.path.expanduser('~/.susops')
 CONFIG_PATH  = os.path.join(WORKSPACE, 'config.yaml')
 AUTOSTART_DIR  = os.path.expanduser('~/.config/autostart')
@@ -40,19 +42,21 @@ AUTOSTART_FILE = os.path.join(AUTOSTART_DIR, 'org.susops.App.desktop')
 
 SUSOPS_SH = next(
     (os.path.realpath(p) for p in [
+        os.path.join(_bundle, 'susops.sh') if _bundle else None,
         os.path.join(_here, '..', 'susops-cli', 'susops.sh'),
         '/app/share/susops/susops.sh',
         os.path.expanduser('~/.local/share/susops/susops.sh'),
-    ] if os.path.exists(p)),
+    ] if p and os.path.exists(p)),
     None,
 )
 
 ICON_PATH = next(
     (p for p in [
+        os.path.join(_bundle, 'icon.png') if _bundle else None,
         '/app/share/icons/hicolor/128x128/apps/org.susops.App.png',
         os.path.join(_here, '..', 'susops-cli', 'icon.png'),
         os.path.join(_here, 'icon.png'),
-    ] if os.path.exists(p)),
+    ] if p and os.path.exists(p)),
     '',
 )
 
