@@ -6,5 +6,6 @@ __pycache__
 pkg/
 src/
 susops-linux/
+susops-tray/
 dist/
 susops-tray-*.tar.zst

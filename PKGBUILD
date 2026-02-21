@@ -1,6 +1,6 @@
 # Maintainer: Manuel Schmid <https://github.com/mashb1t>
-pkgname=susops-tray
-pkgver=1.0.0
+pkgname=susops
+pkgver=1.0.1
 pkgrel=1
 pkgdesc='System tray app for managing SusOps SSH SOCKS5 proxy and port forwards'
 arch=('any')
@@ -21,11 +21,6 @@ source=(
     "susops-cli::git+https://github.com/mashb1t/susops-cli.git"
 )
 sha256sums=('SKIP' 'SKIP')
-
-pkgver() {
-    cd "${pkgname}"
-    python3 -c "exec(open('version.py').read()); print(VERSION)"
-}
 
 prepare() {
     cd "${pkgname}"

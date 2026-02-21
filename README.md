@@ -96,7 +96,7 @@ git clone --recursive https://github.com/mashb1t/susops-linux.git
 cd susops-linux
 
 # Run directly (uses system python-gobject, no venv needed)
-python3 susops_tray.py
+python3 susops.py
 
 # Test the installed version
 ./build.sh --run
@@ -148,7 +148,7 @@ See [SusOps CLI Readme](https://github.com/mashb1t/susops-cli?tab=readme-ov-file
 
 1. Set up the project as described above in "Development".
 2. Create a feature branch.
-3. `python3 susops_tray.py` while hacking the UI.
+3. `python3 susops.py` while hacking the UI.
 4. `./build.sh --run` to test the installed version.
 5. Open a [PR](https://github.com/mashb1t/susops-linux/pulls).
 

@@ -6,6 +6,7 @@ gi.require_version('Gtk', '3.0')
 
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import threading
@@ -271,9 +272,9 @@ def discover_browsers() -> list[dict]:
 # ── susops command execution ──────────────────────────────────────────────────
 def _build_cmd(susops_args: str) -> list[str]:
     if SUSOPS_SH:
-        cmd = [SUSOPS_SH] + susops_args.split()
+        cmd = [SUSOPS_SH] + shlex.split(susops_args)
     else:
-        cmd = ['susops'] + susops_args.split()
+        cmd = ['susops'] + shlex.split(susops_args)
 
     return cmd
 

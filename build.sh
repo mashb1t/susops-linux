@@ -101,7 +101,7 @@ case "$ACTION" in
         echo "==> Installing susops-tray to ${PREFIX} …"
 
         # App files
-        install -Dm644 susops_tray.py       "${LIB_DIR}/susops_tray.py"
+        install -Dm644 susops.py            "${LIB_DIR}/susops.py"
         install -Dm644 version.py           "${LIB_DIR}/version.py"
         install -Dm755 susops-cli/susops.sh "${LIB_DIR}/susops.sh"
         install -Dm644 icon.png             "${LIB_DIR}/icon.png"
@@ -118,7 +118,7 @@ case "$ACTION" in
         cat > "${BIN_DIR}/susops-tray" << EOF
 #!/bin/bash
 export PYTHONPATH="${LIB_DIR}\${PYTHONPATH:+:\$PYTHONPATH}"
-exec /usr/bin/python3 "${LIB_DIR}/susops_tray.py" "\$@"
+exec /usr/bin/python3 "${LIB_DIR}/susops.py" "\$@"
 EOF
         chmod 755 "${BIN_DIR}/susops-tray"
 
