@@ -10,6 +10,8 @@ A native-feeling **system tray app** for the [**SusOps CLI**](https://github.com
 Built with GTK3 and AyatanaAppIndicator3, the app lets you start/stop the SusOps SOCKS proxy, add
 local / remote port-forwards, and tweak settings without touching a terminal.
 
+<img src="screenshots/menu.png" alt="Menu" height="400"/>
+
 ## Features
 
 | Menu action                      | CLI equivalent                                              | What it does                                             |
@@ -36,7 +38,6 @@ local / remote port-forwards, and tweak settings without touching a terminal.
   * `autossh`
   * `netcat` / `openbsd-netcat`
   * `gtk3`
-  * `libayatana-appindicator3` (or `libappindicator3`)
   * `python-gobject` (PyGObject)
 * A remote host you have SSH access to
 
@@ -59,12 +60,11 @@ git submodule update --init
 
 ```bash
 # Arch Linux
-sudo pacman -S go-yq autossh openbsd-netcat gtk3 libayatana-appindicator python-gobject
+sudo pacman -S go-yq autossh openbsd-netcat gtk3 python-gobject
 
 # Debian / Ubuntu
 sudo apt install golang-github-mikefarah-yq autossh netcat-openbsd \
-  python3-gi python3-gi-cairo gir1.2-gtk-3.0 \
-  gir1.2-ayatanaappindicator3-0.1 libayatana-appindicator3-1
+  python3-gi python3-gi-cairo gir1.2-gtk-3.0
 ```
 
 ### 3. Install the app
