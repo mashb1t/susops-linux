@@ -1,7 +1,7 @@
 [Desktop Entry]
 Name=SusOps
 Comment=SSH tunnelling and SOCKS5 proxy management
-Exec=susops-tray
+Exec=susops
 Icon=org.susops.App
 Type=Application
 Categories=Network;

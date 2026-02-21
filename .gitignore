@@ -5,7 +5,7 @@ __pycache__
 
 pkg/
 src/
-susops-linux/
-susops-tray/
+build/
+susops/
 dist/
-susops-tray-*.tar.zst
+susops-*.tar.zst

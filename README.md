@@ -44,7 +44,16 @@ local / remote port-forwards, and tweak settings without touching a terminal.
 
 ## Setup
 
-### 1. Clone with submodule
+### Arch Linux
+
+The app is available as a proper Arch package in the [AUR](https://aur.archlinux.org/packages/susops/).
+
+```bash
+yay -S susops
+```
+
+### All other distros
+####1. Clone with submodule
 
 ```bash
 git clone --recursive https://github.com/mashb1t/susops-linux.git
@@ -57,7 +66,7 @@ Or if you already cloned without `--recursive`:
 git submodule update --init
 ```
 
-### 2. Install dependencies and the app
+#### 2. Install dependencies and the app
 
 ```bash
 ./build.sh
@@ -76,7 +85,7 @@ To uninstall:
 
 ### 4. Configure
 
-1. Launch the application (`susops-tray`)
+1. Launch the application (`susops`)
 2. Set up your SSH host and ports in the **Settings** menu
 3. Start the proxy (tray icon turns green)
 4. Add domains or port-forwards as needed
@@ -110,21 +119,21 @@ python3 susops.py
 
 ### Arch Linux (installed via pacman)
 
-| Location                                          | Purpose                              |
-|---------------------------------------------------|--------------------------------------|
-| `~/.susops/`                                      | Config files shared with the CLI.    |
-| `/usr/bin/susops-tray`                            | Launcher script.                     |
-| `/usr/lib/susops/`                                | App files (script, icons, CLI).      |
-| `/usr/share/applications/susops-tray.desktop`     | Desktop entry.                       |
+| Location                                 | Purpose                              |
+|------------------------------------------|--------------------------------------|
+| `~/.susops/`                             | Config files shared with the CLI.    |
+| `/usr/bin/susops`                        | Launcher script.                     |
+| `/usr/lib/susops/`                       | App files (script, icons, CLI).      |
+| `/usr/share/applications/susops.desktop` | Desktop entry.                       |
 
 ### Other distros (installed to `~/.local`)
 
-| Location                                               | Purpose                              |
-|--------------------------------------------------------|--------------------------------------|
-| `~/.susops/`                                           | Config files shared with the CLI.    |
-| `~/.local/bin/susops-tray`                             | Launcher script.                     |
-| `~/.local/lib/susops/`                                 | App files (script, icons, CLI).      |
-| `~/.local/share/applications/susops-tray.desktop`      | Desktop entry.                       |
+| Location                                     | Purpose                              |
+|----------------------------------------------|--------------------------------------|
+| `~/.susops/`                                 | Config files shared with the CLI.    |
+| `~/.local/bin/susops`                        | Launcher script.                     |
+| `~/.local/lib/susops/`                       | App files (script, icons, CLI).      |
+| `~/.local/share/applications/susops.desktop` | Desktop entry.                       |
 
 ## How To Use SusOps As Docker Proxy
 
@@ -132,17 +141,17 @@ See [SusOps CLI Readme](https://github.com/mashb1t/susops-cli?tab=readme-ov-file
 
 ## Troubleshooting
 
-| Problem | Solution |
-|---------|----------|
-| **Tray icon doesn't appear** | Install an AppIndicator extension. On GNOME: [AppIndicator and KStatusNotifierItem Support](https://extensions.gnome.org/extension/615/appindicator-support/). |
-| **`susops-tray` not found after install** | Arch: ensure `/usr/bin` is in your `$PATH`. Other distros: add `export PATH="$HOME/.local/bin:$PATH"` to your shell profile. |
-| **SusOps in state "error"** | Ensure you have configured a connection and `~/.susops/` exists. Run `so add-connection <tag> <ssh_host> <socks_port>` first. |
-| **Proxy doesn't start** | Verify you can SSH to the host manually. Check that `go-yq` (v4) is installed, not the Python-based `yq`. |
-| **`yq` errors in logs** | You have the wrong `yq`. Install `go-yq` (Arch: `sudo pacman -S go-yq`). |
-| **Proxy shows as stopped even when running** | Known Linux behaviour — `autossh` process names aren't visible to `pgrep -x`. The app works around this automatically. |
-| **Chrome doesn't pick up added domains** | Close Chrome fully and reopen it via **Launch Browser**. Then open Chrome Proxy Settings and click **Re-apply settings**. |
-| **Firefox doesn't pick up added domains** | Close Firefox fully and reopen it via **Launch Browser**. |
-| **Everything else** | See [Troubleshooting — SusOps CLI](https://github.com/mashb1t/susops-cli?tab=readme-ov-file#troubleshooting) or [report a bug](https://github.com/mashb1t/susops-linux/issues/new). |
+| Problem                                      | Solution                                                                                                                                                                            |
+|----------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Tray icon doesn't appear**                 | Install an AppIndicator extension. On GNOME: [AppIndicator and KStatusNotifierItem Support](https://extensions.gnome.org/extension/615/appindicator-support/).                      |
+| **`susops` not found after install**         | Arch: ensure `/usr/bin` is in your `$PATH`. Other distros: add `export PATH="$HOME/.local/bin:$PATH"` to your shell profile.                                                        |
+| **SusOps in state "error"**                  | Ensure you have configured a connection and `~/.susops/` exists. Run `so add-connection <tag> <ssh_host> <socks_port>` first.                                                       |
+| **Proxy doesn't start**                      | Verify you can SSH to the host manually. Check that `go-yq` (v4) is installed, not the Python-based `yq`.                                                                           |
+| **`yq` errors in logs**                      | You have the wrong `yq`. Install `go-yq` (Arch: `sudo pacman -S go-yq`).                                                                                                            |
+| **Proxy shows as stopped even when running** | Known Linux behaviour — `autossh` process names aren't visible to `pgrep -x`. The app works around this automatically.                                                              |
+| **Chrome doesn't pick up added domains**     | Close Chrome fully and reopen it via **Launch Browser**. Then open Chrome Proxy Settings and click **Re-apply settings**.                                                           |
+| **Firefox doesn't pick up added domains**    | Close Firefox fully and reopen it via **Launch Browser**.                                                                                                                           |
+| **Everything else**                          | See [Troubleshooting — SusOps CLI](https://github.com/mashb1t/susops-cli?tab=readme-ov-file#troubleshooting) or [report a bug](https://github.com/mashb1t/susops-linux/issues/new). |
 
 ## Contributing
 

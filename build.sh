@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build.sh – Build and install susops-tray
+# build.sh – Build and install susops
 #
 # Usage:
 #   ./build.sh              # install system dependencies + install app
@@ -59,19 +59,19 @@ install_deps() {
 if command -v pacman &>/dev/null; then
     case "$ACTION" in
         --uninstall)
-            echo "==> Removing susops-tray …"
-            sudo pacman -R susops-tray
+            echo "==> Removing susops …"
+            sudo pacman -R susops
             exit 0
             ;;
         --run)
             cd "$SCRIPT_DIR"
             makepkg -si --noconfirm
-            exec susops-tray
+            exec susops
             ;;
         *)
             cd "$SCRIPT_DIR"
             makepkg -si --noconfirm
-            echo "==> Done. Run with: susops-tray"
+            echo "==> Done. Run with: susops"
             exit 0
             ;;
     esac
@@ -86,10 +86,10 @@ ICON_DIR="${PREFIX}/share/icons/hicolor/128x128/apps"
 
 case "$ACTION" in
     --uninstall)
-        echo "==> Removing susops-tray from ${PREFIX} …"
+        echo "==> Removing susops from ${PREFIX} …"
         rm -rf "${LIB_DIR}"
-        rm -f  "${BIN_DIR}/susops-tray"
-        rm -f  "${APP_DIR}/susops-tray.desktop"
+        rm -f  "${BIN_DIR}/susops"
+        rm -f  "${APP_DIR}/susops.desktop"
         rm -f  "${ICON_DIR}/org.susops.App.png"
         echo "==> Done."
         exit 0
@@ -98,7 +98,7 @@ case "$ACTION" in
         install_deps
         cd "$SCRIPT_DIR"
 
-        echo "==> Installing susops-tray to ${PREFIX} …"
+        echo "==> Installing susops to ${PREFIX} …"
 
         # App files
         install -Dm644 susops.py            "${LIB_DIR}/susops.py"
@@ -111,22 +111,22 @@ case "$ACTION" in
         install -Dm644 icon.png "${ICON_DIR}/org.susops.App.png"
 
         # Desktop entry
-        install -Dm644 susops-tray.desktop "${APP_DIR}/susops-tray.desktop"
+        install -Dm644 susops.desktop "${APP_DIR}/susops.desktop"
 
         # Launcher
         install -dm755 "${BIN_DIR}"
-        cat > "${BIN_DIR}/susops-tray" << EOF
+        cat > "${BIN_DIR}/susops" << EOF
 #!/bin/bash
 export PYTHONPATH="${LIB_DIR}\${PYTHONPATH:+:\$PYTHONPATH}"
 exec /usr/bin/python3 "${LIB_DIR}/susops.py" "\$@"
 EOF
-        chmod 755 "${BIN_DIR}/susops-tray"
+        chmod 755 "${BIN_DIR}/susops"
 
-        echo "==> Done. Run with: susops-tray"
+        echo "==> Done. Run with: susops"
         echo "    (ensure ${BIN_DIR} is in your \$PATH)"
 
         if [[ "$ACTION" == "--run" ]]; then
-            exec "${BIN_DIR}/susops-tray"
+            exec "${BIN_DIR}/susops"
         fi
         ;;
 esac
