@@ -3,7 +3,8 @@ __pycache__
 *.pyc
 .venv
 
-pkg
-src
-susops-linux
+pkg/
+src/
+susops-linux/
+dist/
 susops-tray-*.tar.zst

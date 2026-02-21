@@ -38,14 +38,11 @@ package() {
     install -Dm755 susops-cli/susops.sh "$pkgdir/usr/lib/susops/susops.sh"
     cp -r icons "$pkgdir/usr/lib/susops/icons"
 
-    # App icon — install to both the system icon dir and alongside the script
-    # so ICON_PATH resolution finds it via either fallback
-    if [[ -f susops-cli/icon.png ]]; then
-        install -Dm644 susops-cli/icon.png \
-            "$pkgdir/usr/share/icons/hicolor/128x128/apps/org.susops.App.png"
-        install -Dm644 susops-cli/icon.png \
-            "$pkgdir/usr/lib/susops/icon.png"
-    fi
+    # App icon
+    install -Dm644 icon.png \
+        "$pkgdir/usr/share/icons/hicolor/128x128/apps/org.susops.App.png"
+    install -Dm644 icon.png \
+        "$pkgdir/usr/lib/susops/icon.png"
 
     # Desktop entry
     install -Dm644 susops-tray.desktop \

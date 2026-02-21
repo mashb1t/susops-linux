@@ -1,5 +1,5 @@
 <p align="center">
-    <img src="susops-cli/icon.png" alt="SusOps" height="200" />
+    <img src="icon.png" alt="SusOps" height="200" />
 </p>
 
 # SusOps for Linux - SSH Utilities & SOCKS5 Operations
