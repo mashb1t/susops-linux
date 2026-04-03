@@ -1305,6 +1305,11 @@ class SusOpsApp:
         self._dlg_rm_local     = None
         self._dlg_rm_remote    = None
         self._dlg_about        = None
+        self._dlg_share        = None
+        self._dlg_fetch        = None
+        self._active_shares    = []
+        self._ft_sub           = None   # File Transfer Gtk.Menu (for dynamic item insertion)
+        self._share_sep        = None   # separator shown when shares list is non-empty
 
         self._menu = self._build_menu()
         self._setup_indicator()
@@ -1445,6 +1450,26 @@ class SusOpsApp:
         self._browser_item = Gtk.MenuItem(label='Launch Browser')
         m.append(self._browser_item)
         self._rebuild_browser_submenu()
+        m.append(Gtk.SeparatorMenuItem())
+
+        # ── File Transfer submenu ─────────────────────────────────────────────
+        ft_item      = Gtk.MenuItem(label='File Transfer')
+        self._ft_sub = Gtk.Menu()
+
+        share_mi = Gtk.MenuItem(label='Share File…')
+        share_mi.connect('activate', self._on_share_file)
+        self._ft_sub.append(share_mi)
+
+        fetch_mi = Gtk.MenuItem(label='Fetch File…')
+        fetch_mi.connect('activate', self._on_fetch_file)
+        self._ft_sub.append(fetch_mi)
+
+        self._share_sep = Gtk.SeparatorMenuItem()
+        self._ft_sub.append(self._share_sep)
+        self._share_sep.hide()
+
+        ft_item.set_submenu(self._ft_sub)
+        m.append(ft_item)
         m.append(Gtk.SeparatorMenuItem())
 
         # ── Reset All ─────────────────────────────────────────────────────────
