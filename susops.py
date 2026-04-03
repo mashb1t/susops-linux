@@ -1839,6 +1839,106 @@ class SusOpsApp:
             self._poll()
         ))
 
+    # ── File Transfer — Share ─────────────────────────────────────────────────
+
+    def _on_share_file(self, _):
+        if self._dlg_share is None:
+            self._dlg_share = ShareFileDialog(self._root, self)
+        self._dlg_share.run()
+
+    def _start_share(self, conn: str, file_path: str, password: str, port: str):
+        cmd = ([SUSOPS_SH] if SUSOPS_SH else ['susops']) + [
+            '-c', conn, 'share', file_path, password, port]
+        proc = subprocess.Popen(cmd, start_new_session=True,
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL)
+
+        name = os.path.basename(file_path)
+        item = Gtk.MenuItem(label=f'📤 {name} (port {port})')
+        entry = {
+            'proc':      proc,
+            'port':      port,
+            'password':  password,
+            'file_path': file_path,
+            'conn':      conn,
+            'state':     'running',
+            'menu_item': item,
+            'info_dlg':  None,
+        }
+        item.connect('activate', lambda _, e=entry: self._on_share_item_clicked(e))
+        self._ft_sub.append(item)
+        item.show()
+        self._share_sep.show()
+        self._active_shares.append(entry)
+
+        def _watch():
+            proc.wait()
+            GLib.idle_add(self._on_share_exited, entry)
+        threading.Thread(target=_watch, daemon=True).start()
+
+        dlg = ShareInfoDialog(self._root, self, entry)
+        entry['info_dlg'] = dlg
+        dlg.show()
+
+    def _on_share_item_clicked(self, entry: dict):
+        if entry['info_dlg'] is None:
+            dlg = ShareInfoDialog(self._root, self, entry)
+            entry['info_dlg'] = dlg
+        entry['info_dlg'].present()
+
+    def _on_share_exited(self, entry: dict) -> bool:
+        entry['state'] = 'stopped'
+        name = os.path.basename(entry['file_path'])
+        entry['menu_item'].set_label(f'📤 {name} (port {entry["port"]}) ●')
+        if entry['info_dlg']:
+            entry['info_dlg'].update_to_stopped()
+        self._poll()
+        return False  # one-shot GLib.idle_add
+
+    def _stop_share(self, entry: dict):
+        try:
+            os.killpg(os.getpgid(entry['proc'].pid), signal.SIGINT)
+        except (ProcessLookupError, OSError):
+            pass
+
+    def _restart_share(self, entry: dict):
+        if not os.path.isfile(entry['file_path']):
+            _alert(self._root, 'File Not Found',
+                   f'File no longer exists:\n{entry["file_path"]}',
+                   Gtk.MessageType.ERROR)
+            return
+        cmd = ([SUSOPS_SH] if SUSOPS_SH else ['susops']) + [
+            '-c', entry['conn'], 'share',
+            entry['file_path'], entry['password'], entry['port']]
+        proc = subprocess.Popen(cmd, start_new_session=True,
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL)
+        entry['proc']  = proc
+        entry['state'] = 'running'
+        name = os.path.basename(entry['file_path'])
+        entry['menu_item'].set_label(f'📤 {name} (port {entry["port"]})')
+        if entry['info_dlg']:
+            entry['info_dlg'].update_to_running()
+
+        def _watch():
+            proc.wait()
+            GLib.idle_add(self._on_share_exited, entry)
+        threading.Thread(target=_watch, daemon=True).start()
+
+    def _remove_share_entry(self, entry: dict):
+        if entry in self._active_shares:
+            self._active_shares.remove(entry)
+        entry['menu_item'].destroy()
+        if not self._active_shares:
+            self._share_sep.hide()
+
+    # ── File Transfer — Fetch ─────────────────────────────────────────────────
+
+    def _on_fetch_file(self, _):
+        if self._dlg_fetch is None:
+            self._dlg_fetch = FetchFileDialog(self._root, self)
+        self._dlg_fetch.open()
+
     # ── About ─────────────────────────────────────────────────────────────────
 
     def _on_about(self, _):
