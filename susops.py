@@ -1065,7 +1065,7 @@ class ShareInfoDialog(Gtk.Dialog):
             self.hide()
 
     def _on_delete(self, _dlg, _event):
-        self._on_response(self, Gtk.ResponseType.CLOSE)
+        self._on_response(None, Gtk.ResponseType.CLOSE)
         return True  # suppress default destroy
 
     # ── Live update from _on_share_exited ────────────────────────────────────
