@@ -282,11 +282,12 @@ def _build_cmd(susops_args: str) -> list[str]:
     return cmd
 
 
-def run_cmd(susops_args: str, timeout: int = 30) -> tuple[str, int]:
+def run_cmd(susops_args: str, timeout: int = 30, cwd: str | None = None) -> tuple[str, int]:
     """Run susops command. Returns (combined stdout+stderr, returncode)."""
     try:
         r = subprocess.run(_build_cmd(susops_args),
-                           capture_output=True, text=True, timeout=timeout)
+                           capture_output=True, text=True, timeout=timeout,
+                           cwd=cwd)
         # Prefer stdout; fall back to stderr so errors are never silently swallowed
         out = r.stdout.strip() or r.stderr.strip()
         return out, r.returncode
@@ -296,10 +297,10 @@ def run_cmd(susops_args: str, timeout: int = 30) -> tuple[str, int]:
         return str(exc), 1
 
 
-def run_async(susops_args: str, callback, timeout: int = 30):
+def run_async(susops_args: str, callback, timeout: int = 30, cwd: str | None = None):
     """Run susops command in background; call callback(stdout, rc) on GTK main thread."""
     def _worker():
-        out, rc = run_cmd(susops_args, timeout)
+        out, rc = run_cmd(susops_args, timeout, cwd=cwd)
         GLib.idle_add(callback, out, rc)
     threading.Thread(target=_worker, daemon=True).start()
 
@@ -1051,10 +1052,10 @@ class ShareInfoDialog(Gtk.Dialog):
     # ── Response handling ─────────────────────────────────────────────────────
 
     def _on_response(self, _dlg, response):
-        if response == Gtk.ResponseType.APPLY:          # Stop
+        if response == Gtk.ResponseType.APPLY:
             self._stop_btn.set_sensitive(False)
             self._app._stop_share(self._entry)
-        elif response == Gtk.ResponseType.ACCEPT:       # Share Again
+        elif response == Gtk.ResponseType.ACCEPT:
             self._app._restart_share(self._entry)
         elif response in (Gtk.ResponseType.CLOSE,
                           Gtk.ResponseType.DELETE_EVENT,
@@ -1090,7 +1091,7 @@ class FetchFileDialog(Gtk.Dialog):
     def __init__(self, parent: Gtk.Window, app):
         super().__init__(title='Fetch File', transient_for=parent, modal=False)
         self._app     = app
-        self._outfile = None
+        self._dest_dir = None
         self.set_default_size(440, -1)
 
         self.add_buttons('_Cancel', Gtk.ResponseType.CANCEL,
@@ -1117,7 +1118,7 @@ class FetchFileDialog(Gtk.Dialog):
                               lambda b: self._password.set_visibility(b.get_active()))
         pass_box.pack_start(self._eye_btn, False, False, 0)
 
-        # Save As with Browse button
+        # Save To with Browse button
         save_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4,
                            hexpand=True)
         self._save_label = Gtk.Label(label='(not chosen)', xalign=0.0,
@@ -1136,7 +1137,7 @@ class FetchFileDialog(Gtk.Dialog):
             ('conn', 'Connection *:', self._conn),
             ('port', 'Port *:',       self._port),
             ('pass', 'Password *:',   pass_box),
-            ('save', 'Save As *:',    save_box),
+            ('save', 'Save To *:',    save_box),
         ])
         box = self.get_content_area()
         box.add(grid)
@@ -1169,7 +1170,7 @@ class FetchFileDialog(Gtk.Dialog):
     # ── Validation ────────────────────────────────────────────────────────────
 
     def _on_input_changed(self, *_):
-        ok = (bool(self._outfile)
+        ok = (bool(self._dest_dir)
               and is_valid_port(self._port.get_text().strip())
               and bool(self._password.get_text().strip()))
         self._fetch_btn.set_sensitive(ok)
@@ -1178,16 +1179,17 @@ class FetchFileDialog(Gtk.Dialog):
 
     def _on_browse(self, _):
         chooser = Gtk.FileChooserDialog(
-            title='Save fetched file as',
+            title='Select destination folder…',
             transient_for=self,
-            action=Gtk.FileChooserAction.SAVE)
+            action=Gtk.FileChooserAction.SELECT_FOLDER)
         chooser.add_buttons('_Cancel', Gtk.ResponseType.CANCEL,
-                            '_Save',   Gtk.ResponseType.OK)
-        chooser.set_do_overwrite_confirmation(True)
+                            '_Select', Gtk.ResponseType.OK)
         if chooser.run() == Gtk.ResponseType.OK:
-            self._outfile = chooser.get_filename()
-            self._save_label.set_text(self._outfile)
-            self._save_label.get_style_context().remove_class('dim-label')
+            selected_dir = chooser.get_filename()
+            if selected_dir:
+                self._dest_dir = selected_dir
+                self._save_label.set_text(selected_dir)
+                self._save_label.get_style_context().remove_class('dim-label')
         chooser.destroy()
         self._on_input_changed()
 
@@ -1205,32 +1207,42 @@ class FetchFileDialog(Gtk.Dialog):
         port     = self._port.get_text().strip()
         password = self._password.get_text().strip()
 
-        if not all([conn, is_valid_port(port), password, self._outfile]):
+        if not all([conn, is_valid_port(port), password, self._dest_dir]):
             return  # button guard prevents this in practice
 
         self._fetch_btn.set_sensitive(False)
         self._status_label.show()
 
         cmd = (f'-c {shlex.quote(conn)} fetch {shlex.quote(port)} '
-               f'{shlex.quote(password)} {shlex.quote(self._outfile)}')
-        run_async(cmd, self._on_fetch_done, timeout=120)
+               f'{shlex.quote(password)}')
+        run_async(cmd, self._on_fetch_done, timeout=120, cwd=self._dest_dir)
 
     # ── Fetch callback ────────────────────────────────────────────────────────
 
     def _on_fetch_done(self, out: str, rc: int):
         self._status_label.hide()
         if rc == 0:
-            saved = self._outfile  # capture before _reset_fields() clears it
+            # CLI prints "✅ Saved to <filename>" — extract the filename
+            saved_name = None
+            for line in out.splitlines():
+                if 'Saved to' in line:
+                    saved_name = line.split('Saved to', 1)[1].strip()
+                    break
+            dest_dir = self._dest_dir  # capture before reset
+            if saved_name:
+                saved_path = os.path.join(dest_dir, saved_name) if not os.path.isabs(saved_name) else saved_name
+            else:
+                saved_path = dest_dir
             self.hide()
             self._reset_fields()
             _alert(self._app._root, 'Download Complete',
-                   f'File saved to:\n{saved}')
+                   f'File saved to:\n{saved_path}')
         else:
             self._fetch_btn.set_sensitive(True)
             _alert(self, 'Download Failed', out, Gtk.MessageType.ERROR)
 
     def _reset_fields(self):
-        self._outfile = None
+        self._dest_dir = None
         self._save_label.set_text('(not chosen)')
         self._save_label.get_style_context().add_class('dim-label')
         self._port.set_text('')
