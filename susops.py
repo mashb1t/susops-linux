@@ -1085,7 +1085,7 @@ class ShareInfoDialog(Gtk.Dialog):
         self.show_all()
 
 
-# ── Fetch File dialog (non-blocking modal to allow download status display) ───
+# ── Fetch File dialog (non-modal; stays open while download is in progress) ───
 class FetchFileDialog(Gtk.Dialog):
     def __init__(self, parent: Gtk.Window, app):
         super().__init__(title='Fetch File', transient_for=parent, modal=False)
@@ -1159,10 +1159,11 @@ class FetchFileDialog(Gtk.Dialog):
         for t in tags: self._conn.append_text(t)
         if tags:
             self._conn.set_active(0)
-        if not tags:
+        else:
             _alert(self._app._root, 'No Connection',
                    'Add a connection first.', Gtk.MessageType.ERROR)
             return
+        self._reset_fields()
         self.present()
 
     # ── Validation ────────────────────────────────────────────────────────────
@@ -1210,7 +1211,7 @@ class FetchFileDialog(Gtk.Dialog):
         self._fetch_btn.set_sensitive(False)
         self._status_label.show()
 
-        cmd = (f'-c "{conn}" fetch {port} '
+        cmd = (f'-c {shlex.quote(conn)} fetch {port} '
                f'{shlex.quote(password)} {shlex.quote(self._outfile)}')
         run_async(cmd, self._on_fetch_done, timeout=120)
 
@@ -1219,7 +1220,7 @@ class FetchFileDialog(Gtk.Dialog):
     def _on_fetch_done(self, out: str, rc: int):
         self._status_label.hide()
         if rc == 0:
-            saved = self._outfile
+            saved = self._outfile  # capture before _reset_fields() clears it
             self.hide()
             self._reset_fields()
             _alert(self._app._root, 'Download Complete',
