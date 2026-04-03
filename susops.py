@@ -1949,6 +1949,12 @@ class SusOpsApp:
     # ── Quit ──────────────────────────────────────────────────────────────────
 
     def _on_quit(self, _):
+        for entry in list(self._active_shares):
+            if entry['state'] == 'running':
+                try:
+                    os.killpg(os.getpgid(entry['proc'].pid), signal.SIGINT)
+                except (ProcessLookupError, OSError):
+                    pass
         if self.config.get('stop_on_quit', True):
             run_cmd('stop --keep-ports', timeout=15)
         Gtk.main_quit()
