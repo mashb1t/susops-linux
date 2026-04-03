@@ -895,6 +895,78 @@ class RemoveRemoteForwardDialog(_RemoveDialog):
         return f'rm -r {m.group(1)}' if m else ''
 
 
+# ── Share File dialog ─────────────────────────────────────────────────────────
+class ShareFileDialog(Gtk.Dialog):
+    def __init__(self, parent: Gtk.Window, app):
+        super().__init__(title='Share File', transient_for=parent, modal=True)
+        self._app = app
+        self.set_default_size(440, -1)
+        self.add_buttons('_Cancel', Gtk.ResponseType.CANCEL,
+                         '_Share',  Gtk.ResponseType.OK)
+        self.set_default_response(Gtk.ResponseType.OK)
+
+        self._conn     = _make_connection_row()
+        self._file_btn = Gtk.FileChooserButton(
+            title='Select file to share',
+            action=Gtk.FileChooserAction.OPEN)
+        self._password = Gtk.Entry(placeholder_text='auto-generated',
+                                   activates_default=True)
+        self._port     = Gtk.Entry(placeholder_text='auto',
+                                   activates_default=True)
+
+        grid, _ = _labeled_grid([
+            ('conn', 'Connection *:',         self._conn),
+            ('file', 'File *:',               self._file_btn),
+            ('pass', 'Password (optional):',  self._password),
+            ('port', 'Port (optional):',      self._port),
+        ])
+        self.get_content_area().add(grid)
+        _polish_dialog(self)
+        self.show_all()
+
+    def run(self):
+        tags = ConfigHelper.get_connection_tags()
+        model = self._conn.get_model(); model.clear()
+        for t in tags: self._conn.append_text(t)
+        if tags:
+            self._conn.set_active(0)
+        if not tags:
+            self.hide()
+            _alert(self._app._root, 'No Connection',
+                   'Add a connection first.', Gtk.MessageType.ERROR)
+            return
+
+        while True:
+            resp = super().run()
+            if resp != Gtk.ResponseType.OK:
+                self.hide(); return
+
+            conn      = self._conn.get_active_text() or ''
+            file_path = self._file_btn.get_filename() or ''
+            password  = self._password.get_text().strip()
+            port_str  = self._port.get_text().strip()
+
+            if not file_path:
+                _alert(self, 'No File Selected',
+                       'Please select a file to share.',
+                       Gtk.MessageType.ERROR); continue
+            if not os.path.isfile(file_path):
+                _alert(self, 'File Not Found',
+                       f'File not found:\n{file_path}',
+                       Gtk.MessageType.ERROR); continue
+            if port_str and not is_valid_port(port_str):
+                _alert(self, 'Invalid Port',
+                       'Port must be between 1 and 65535.',
+                       Gtk.MessageType.ERROR); continue
+
+            password = password or secrets.token_hex(16)
+            port     = int(port_str) if port_str else _free_port()
+
+            self.hide()
+            self._app._start_share(conn, file_path, password, str(port))
+            return
+
+
 # ── About dialog ──────────────────────────────────────────────────────────────
 class AboutDialog(Gtk.Dialog):
     def __init__(self, parent: Gtk.Window):
