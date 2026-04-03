@@ -930,7 +930,7 @@ class ShareFileDialog(Gtk.Dialog):
         for t in tags: self._conn.append_text(t)
         if tags:
             self._conn.set_active(0)
-        if not tags:
+        else:
             self.hide()
             _alert(self._app._root, 'No Connection',
                    'Add a connection first.', Gtk.MessageType.ERROR)
@@ -963,6 +963,9 @@ class ShareFileDialog(Gtk.Dialog):
             port     = int(port_str) if port_str else _free_port()
 
             self.hide()
+            self._file_btn.unselect_all()
+            self._password.set_text('')
+            self._port.set_text('')
             self._app._start_share(conn, file_path, password, str(port))
             return
 
