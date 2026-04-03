@@ -970,6 +970,121 @@ class ShareFileDialog(Gtk.Dialog):
             return
 
 
+# ── Share Info dialog (non-modal, one per active share) ───────────────────────
+class ShareInfoDialog(Gtk.Dialog):
+    def __init__(self, parent: Gtk.Window, app, entry: dict):
+        self._entry = entry
+        name = os.path.basename(entry['file_path'])
+        super().__init__(title=f'Share Info — {name}',
+                         transient_for=parent, modal=False)
+        self._app = app
+        self.set_default_size(420, -1)
+
+        # ── Content grid ──────────────────────────────────────────────────────
+        grid = Gtk.Grid(column_spacing=12, row_spacing=8,
+                        margin_start=16, margin_end=16,
+                        margin_top=16, margin_bottom=8)
+        self.get_content_area().add(grid)
+
+        def _lbl(text):
+            l = Gtk.Label(label=text, xalign=1.0)
+            l.set_width_chars(12)
+            return l
+
+        # File row
+        grid.attach(_lbl('File:'), 0, 0, 1, 1)
+        file_val = Gtk.Label(label=entry['file_path'], xalign=0.0, hexpand=True)
+        file_val.set_ellipsize(Pango.EllipsizeMode.START)
+        grid.attach(file_val, 1, 0, 1, 1)
+
+        # Port row
+        grid.attach(_lbl('Port:'), 0, 1, 1, 1)
+        port_val = Gtk.Label(label=entry['port'], xalign=0.0, hexpand=True)
+        grid.attach(port_val, 1, 1, 1, 1)
+
+        # Password row: entry + eye toggle + copy button
+        grid.attach(_lbl('Password:'), 0, 2, 1, 1)
+        pass_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4,
+                           hexpand=True)
+        self._pass_entry = Gtk.Entry(text=entry['password'],
+                                     editable=False, visibility=False,
+                                     hexpand=True)
+        pass_box.pack_start(self._pass_entry, True, True, 0)
+
+        eye_btn = Gtk.ToggleButton()
+        eye_btn.add(Gtk.Image.new_from_icon_name('view-reveal-symbolic',
+                                                  Gtk.IconSize.BUTTON))
+        eye_btn.connect('toggled',
+                        lambda b: self._pass_entry.set_visibility(b.get_active()))
+        pass_box.pack_start(eye_btn, False, False, 0)
+
+        copy_btn = Gtk.Button(label='Copy')
+        copy_btn.connect('clicked', self._on_copy_password)
+        pass_box.pack_start(copy_btn, False, False, 0)
+        grid.attach(pass_box, 1, 2, 1, 1)
+
+        # ── Action buttons ────────────────────────────────────────────────────
+        self._stop_btn  = self.add_button('Stop',          Gtk.ResponseType.APPLY)
+        self._again_btn = self.add_button('Share Again',   Gtk.ResponseType.ACCEPT)
+        self._close_btn = self.add_button('_Close',        Gtk.ResponseType.CLOSE)
+
+        self.connect('response',     self._on_response)
+        self.connect('delete-event', self._on_delete)
+
+        self._sync_buttons()
+        _polish_dialog(self)
+        self.show_all()
+
+    # ── Helpers ───────────────────────────────────────────────────────────────
+
+    def _sync_buttons(self):
+        running = self._entry['state'] == 'running'
+        self._stop_btn.set_visible(running)
+        self._stop_btn.set_no_show_all(not running)
+        self._again_btn.set_visible(not running)
+        self._again_btn.set_no_show_all(running)
+
+    def _on_copy_password(self, _):
+        clip = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+        clip.set_text(self._entry['password'], -1)
+
+    # ── Response handling ─────────────────────────────────────────────────────
+
+    def _on_response(self, _dlg, response):
+        if response == Gtk.ResponseType.APPLY:          # Stop
+            self._stop_btn.set_sensitive(False)
+            self._app._stop_share(self._entry)
+        elif response == Gtk.ResponseType.ACCEPT:       # Share Again
+            self._app._restart_share(self._entry)
+        elif response in (Gtk.ResponseType.CLOSE,
+                          Gtk.ResponseType.DELETE_EVENT,
+                          Gtk.ResponseType.NONE):
+            if self._entry['state'] == 'stopped':
+                self._app._remove_share_entry(self._entry)
+            self._entry['info_dlg'] = None
+            self.hide()
+
+    def _on_delete(self, _dlg, _event):
+        self._on_response(self, Gtk.ResponseType.CLOSE)
+        return True  # suppress default destroy
+
+    # ── Live update from _on_share_exited ────────────────────────────────────
+
+    def update_to_stopped(self):
+        name = os.path.basename(self._entry['file_path'])
+        self.set_title(f'Share Info — {name} ●')
+        self._stop_btn.set_sensitive(True)   # reset in case it was disabled
+        self._sync_buttons()
+        self.show_all()
+
+    def update_to_running(self):
+        name = os.path.basename(self._entry['file_path'])
+        self.set_title(f'Share Info — {name}')
+        self._stop_btn.set_sensitive(True)
+        self._sync_buttons()
+        self.show_all()
+
+
 # ── About dialog ──────────────────────────────────────────────────────────────
 class AboutDialog(Gtk.Dialog):
     def __init__(self, parent: Gtk.Window):
