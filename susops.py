@@ -1110,12 +1110,12 @@ class FetchFileDialog(Gtk.Dialog):
                                    visibility=False, activates_default=True,
                                    hexpand=True)
         pass_box.pack_start(self._password, True, True, 0)
-        eye_btn = Gtk.ToggleButton()
-        eye_btn.add(Gtk.Image.new_from_icon_name('view-reveal-symbolic',
-                                                  Gtk.IconSize.BUTTON))
-        eye_btn.connect('toggled',
-                        lambda b: self._password.set_visibility(b.get_active()))
-        pass_box.pack_start(eye_btn, False, False, 0)
+        self._eye_btn = Gtk.ToggleButton()
+        self._eye_btn.add(Gtk.Image.new_from_icon_name('view-reveal-symbolic',
+                                                        Gtk.IconSize.BUTTON))
+        self._eye_btn.connect('toggled',
+                              lambda b: self._password.set_visibility(b.get_active()))
+        pass_box.pack_start(self._eye_btn, False, False, 0)
 
         # Save As with Browse button
         save_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4,
@@ -1211,7 +1211,7 @@ class FetchFileDialog(Gtk.Dialog):
         self._fetch_btn.set_sensitive(False)
         self._status_label.show()
 
-        cmd = (f'-c {shlex.quote(conn)} fetch {port} '
+        cmd = (f'-c {shlex.quote(conn)} fetch {shlex.quote(port)} '
                f'{shlex.quote(password)} {shlex.quote(self._outfile)}')
         run_async(cmd, self._on_fetch_done, timeout=120)
 
@@ -1235,6 +1235,8 @@ class FetchFileDialog(Gtk.Dialog):
         self._save_label.get_style_context().add_class('dim-label')
         self._port.set_text('')
         self._password.set_text('')
+        self._password.set_visibility(False)
+        self._eye_btn.set_active(False)
         self._on_input_changed()
 
 
@@ -1872,8 +1874,8 @@ class SusOpsApp:
         self._active_shares.append(entry)
 
         def _watch():
-            proc.wait()
-            GLib.idle_add(self._on_share_exited, entry)
+            rc = proc.wait()
+            GLib.idle_add(self._on_share_exited, entry, rc)
         threading.Thread(target=_watch, daemon=True).start()
 
         dlg = ShareInfoDialog(self._root, self, entry)
@@ -1886,12 +1888,16 @@ class SusOpsApp:
             entry['info_dlg'] = dlg
         entry['info_dlg'].present()
 
-    def _on_share_exited(self, entry: dict) -> bool:
+    def _on_share_exited(self, entry: dict, rc: int) -> bool:
         entry['state'] = 'stopped'
         name = os.path.basename(entry['file_path'])
         entry['menu_item'].set_label(f'📤 {name} (port {entry["port"]}) ●')
         if entry['info_dlg']:
             entry['info_dlg'].update_to_stopped()
+        if rc != 0:
+            _alert(self._root, 'Share Stopped',
+                   f'Share of {name} stopped unexpectedly (exit {rc}).',
+                   Gtk.MessageType.WARNING)
         self._poll()
         return False  # one-shot GLib.idle_add
 
@@ -1921,8 +1927,8 @@ class SusOpsApp:
             entry['info_dlg'].update_to_running()
 
         def _watch():
-            proc.wait()
-            GLib.idle_add(self._on_share_exited, entry)
+            rc = proc.wait()
+            GLib.idle_add(self._on_share_exited, entry, rc)
         threading.Thread(target=_watch, daemon=True).start()
 
     def _remove_share_entry(self, entry: dict):
