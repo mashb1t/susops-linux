@@ -1085,6 +1085,158 @@ class ShareInfoDialog(Gtk.Dialog):
         self.show_all()
 
 
+# ── Fetch File dialog (non-blocking modal to allow download status display) ───
+class FetchFileDialog(Gtk.Dialog):
+    def __init__(self, parent: Gtk.Window, app):
+        super().__init__(title='Fetch File', transient_for=parent, modal=False)
+        self._app     = app
+        self._outfile = None
+        self.set_default_size(440, -1)
+
+        self.add_buttons('_Cancel', Gtk.ResponseType.CANCEL,
+                         '_Fetch',  Gtk.ResponseType.OK)
+        self._fetch_btn = self.get_widget_for_response(Gtk.ResponseType.OK)
+        self._fetch_btn.set_sensitive(False)
+        self.set_default_response(Gtk.ResponseType.OK)
+
+        self._conn = _make_connection_row()
+        self._port = Gtk.Entry(placeholder_text='e.g. 54321',
+                               activates_default=True)
+
+        # Password with eye toggle
+        pass_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4,
+                           hexpand=True)
+        self._password = Gtk.Entry(placeholder_text='password',
+                                   visibility=False, activates_default=True,
+                                   hexpand=True)
+        pass_box.pack_start(self._password, True, True, 0)
+        eye_btn = Gtk.ToggleButton()
+        eye_btn.add(Gtk.Image.new_from_icon_name('view-reveal-symbolic',
+                                                  Gtk.IconSize.BUTTON))
+        eye_btn.connect('toggled',
+                        lambda b: self._password.set_visibility(b.get_active()))
+        pass_box.pack_start(eye_btn, False, False, 0)
+
+        # Save As with Browse button
+        save_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4,
+                           hexpand=True)
+        self._save_label = Gtk.Label(label='(not chosen)', xalign=0.0,
+                                     hexpand=True)
+        self._save_label.get_style_context().add_class('dim-label')
+        save_box.pack_start(self._save_label, True, True, 0)
+        browse_btn = Gtk.Button(label='Browse…')
+        browse_btn.connect('clicked', self._on_browse)
+        save_box.pack_start(browse_btn, False, False, 0)
+
+        # Status label shown during download
+        self._status_label = Gtk.Label(label='Downloading…', margin_bottom=8)
+        self._status_label.set_no_show_all(True)
+
+        grid, _ = _labeled_grid([
+            ('conn', 'Connection *:', self._conn),
+            ('port', 'Port *:',       self._port),
+            ('pass', 'Password *:',   pass_box),
+            ('save', 'Save As *:',    save_box),
+        ])
+        box = self.get_content_area()
+        box.add(grid)
+        box.add(self._status_label)
+
+        self._port.connect('changed',     self._on_input_changed)
+        self._password.connect('changed', self._on_input_changed)
+
+        self.connect('response',     self._on_response)
+        self.connect('delete-event', lambda d, e: d.hide() or True)
+
+        _polish_dialog(self)
+        self.show_all()
+
+    # ── Open / refresh ────────────────────────────────────────────────────────
+
+    def open(self):
+        tags = ConfigHelper.get_connection_tags()
+        model = self._conn.get_model(); model.clear()
+        for t in tags: self._conn.append_text(t)
+        if tags:
+            self._conn.set_active(0)
+        if not tags:
+            _alert(self._app._root, 'No Connection',
+                   'Add a connection first.', Gtk.MessageType.ERROR)
+            return
+        self.present()
+
+    # ── Validation ────────────────────────────────────────────────────────────
+
+    def _on_input_changed(self, *_):
+        ok = (bool(self._outfile)
+              and is_valid_port(self._port.get_text().strip())
+              and bool(self._password.get_text().strip()))
+        self._fetch_btn.set_sensitive(ok)
+
+    # ── File chooser ──────────────────────────────────────────────────────────
+
+    def _on_browse(self, _):
+        chooser = Gtk.FileChooserDialog(
+            title='Save fetched file as',
+            transient_for=self,
+            action=Gtk.FileChooserAction.SAVE)
+        chooser.add_buttons('_Cancel', Gtk.ResponseType.CANCEL,
+                            '_Save',   Gtk.ResponseType.OK)
+        chooser.set_do_overwrite_confirmation(True)
+        if chooser.run() == Gtk.ResponseType.OK:
+            self._outfile = chooser.get_filename()
+            self._save_label.set_text(self._outfile)
+            self._save_label.get_style_context().remove_class('dim-label')
+        chooser.destroy()
+        self._on_input_changed()
+
+    # ── Response handling ─────────────────────────────────────────────────────
+
+    def _on_response(self, _dlg, response):
+        if response in (Gtk.ResponseType.CANCEL, Gtk.ResponseType.DELETE_EVENT,
+                        Gtk.ResponseType.CLOSE, Gtk.ResponseType.NONE):
+            self.hide()
+            return
+        if response != Gtk.ResponseType.OK:
+            return
+
+        conn     = self._conn.get_active_text() or ''
+        port     = self._port.get_text().strip()
+        password = self._password.get_text().strip()
+
+        if not all([conn, is_valid_port(port), password, self._outfile]):
+            return  # button guard prevents this in practice
+
+        self._fetch_btn.set_sensitive(False)
+        self._status_label.show()
+
+        cmd = (f'-c "{conn}" fetch {port} '
+               f'{shlex.quote(password)} {shlex.quote(self._outfile)}')
+        run_async(cmd, self._on_fetch_done, timeout=120)
+
+    # ── Fetch callback ────────────────────────────────────────────────────────
+
+    def _on_fetch_done(self, out: str, rc: int):
+        self._status_label.hide()
+        if rc == 0:
+            saved = self._outfile
+            self.hide()
+            self._reset_fields()
+            _alert(self._app._root, 'Download Complete',
+                   f'File saved to:\n{saved}')
+        else:
+            self._fetch_btn.set_sensitive(True)
+            _alert(self, 'Download Failed', out, Gtk.MessageType.ERROR)
+
+    def _reset_fields(self):
+        self._outfile = None
+        self._save_label.set_text('(not chosen)')
+        self._save_label.get_style_context().add_class('dim-label')
+        self._port.set_text('')
+        self._password.set_text('')
+        self._on_input_changed()
+
+
 # ── About dialog ──────────────────────────────────────────────────────────────
 class AboutDialog(Gtk.Dialog):
     def __init__(self, parent: Gtk.Window):
