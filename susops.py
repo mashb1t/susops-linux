@@ -6,8 +6,11 @@ gi.require_version('Gtk', '3.0')
 
 import os
 import re
+import secrets
 import shlex
 import shutil
+import signal
+import socket
 import subprocess
 import threading
 from enum import Enum
@@ -318,6 +321,13 @@ def launch_browser(exe: str, args: list[str]):
 # ── Validation helpers ────────────────────────────────────────────────────────
 def is_valid_port(value: str) -> bool:
     return value.isdigit() and 1 <= int(value) <= 65535
+
+
+def _free_port() -> int:
+    """Return a random free local port."""
+    with socket.socket() as s:
+        s.bind(('', 0))
+        return s.getsockname()[1]
 
 
 # ── GTK helpers ───────────────────────────────────────────────────────────────
