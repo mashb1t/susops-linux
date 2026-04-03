@@ -1091,7 +1091,8 @@ class FetchFileDialog(Gtk.Dialog):
     def __init__(self, parent: Gtk.Window, app):
         super().__init__(title='Fetch File', transient_for=parent, modal=False)
         self._app     = app
-        self._dest_dir = None
+        self._default_dest_dir = os.path.expanduser('~/Downloads')
+        self._dest_dir = self._default_dest_dir
         self.set_default_size(440, -1)
 
         self.add_buttons('_Cancel', Gtk.ResponseType.CANCEL,
@@ -1121,9 +1122,8 @@ class FetchFileDialog(Gtk.Dialog):
         # Save To with Browse button
         save_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4,
                            hexpand=True)
-        self._save_label = Gtk.Label(label='(not chosen)', xalign=0.0,
+        self._save_label = Gtk.Label(label=self._default_dest_dir, xalign=0.0,
                                      hexpand=True)
-        self._save_label.get_style_context().add_class('dim-label')
         save_box.pack_start(self._save_label, True, True, 0)
         browse_btn = Gtk.Button(label='Browse…')
         browse_btn.connect('clicked', self._on_browse)
@@ -1137,7 +1137,7 @@ class FetchFileDialog(Gtk.Dialog):
             ('conn', 'Connection *:', self._conn),
             ('port', 'Port *:',       self._port),
             ('pass', 'Password *:',   pass_box),
-            ('save', 'Save To *:',    save_box),
+            ('save', 'Save To:',     save_box),
         ])
         box = self.get_content_area()
         box.add(grid)
@@ -1170,8 +1170,7 @@ class FetchFileDialog(Gtk.Dialog):
     # ── Validation ────────────────────────────────────────────────────────────
 
     def _on_input_changed(self, *_):
-        ok = (bool(self._dest_dir)
-              and is_valid_port(self._port.get_text().strip())
+        ok = (is_valid_port(self._port.get_text().strip())
               and bool(self._password.get_text().strip()))
         self._fetch_btn.set_sensitive(ok)
 
@@ -1207,7 +1206,7 @@ class FetchFileDialog(Gtk.Dialog):
         port     = self._port.get_text().strip()
         password = self._password.get_text().strip()
 
-        if not all([conn, is_valid_port(port), password, self._dest_dir]):
+        if not all([conn, is_valid_port(port), password]):
             return  # button guard prevents this in practice
 
         self._fetch_btn.set_sensitive(False)
@@ -1242,9 +1241,9 @@ class FetchFileDialog(Gtk.Dialog):
             _alert(self, 'Download Failed', out, Gtk.MessageType.ERROR)
 
     def _reset_fields(self):
-        self._dest_dir = None
-        self._save_label.set_text('(not chosen)')
-        self._save_label.get_style_context().add_class('dim-label')
+        self._dest_dir = self._default_dest_dir
+        self._save_label.set_text(self._default_dest_dir)
+        self._save_label.get_style_context().remove_class('dim-label')
         self._port.set_text('')
         self._password.set_text('')
         self._password.set_visibility(False)
