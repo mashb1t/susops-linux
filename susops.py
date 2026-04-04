@@ -6,14 +6,10 @@ gi.require_version('Gtk', '3.0')
 
 import os
 import re
-import secrets
 import shlex
 import shutil
-import signal
-import socket
 import subprocess
 import threading
-import time
 from enum import Enum
 from pathlib import Path
 from typing import Optional
@@ -283,12 +279,11 @@ def _build_cmd(susops_args: str) -> list[str]:
     return cmd
 
 
-def run_cmd(susops_args: str, timeout: int = 30, cwd: str | None = None) -> tuple[str, int]:
+def run_cmd(susops_args: str, timeout: int = 30) -> tuple[str, int]:
     """Run susops command. Returns (combined stdout+stderr, returncode)."""
     try:
         r = subprocess.run(_build_cmd(susops_args),
-                           capture_output=True, text=True, timeout=timeout,
-                           cwd=cwd)
+                           capture_output=True, text=True, timeout=timeout)
         # Prefer stdout; fall back to stderr so errors are never silently swallowed
         out = r.stdout.strip() or r.stderr.strip()
         return out, r.returncode
@@ -298,53 +293,12 @@ def run_cmd(susops_args: str, timeout: int = 30, cwd: str | None = None) -> tupl
         return str(exc), 1
 
 
-def run_async(susops_args: str, callback, timeout: int = 30, cwd: str | None = None):
+def run_async(susops_args: str, callback, timeout: int = 30):
     """Run susops command in background; call callback(stdout, rc) on GTK main thread."""
     def _worker():
-        out, rc = run_cmd(susops_args, timeout, cwd=cwd)
+        out, rc = run_cmd(susops_args, timeout)
         GLib.idle_add(callback, out, rc)
     threading.Thread(target=_worker, daemon=True).start()
-
-
-_SHARE_LOOP_NAME = 'susops-share-loop'
-
-
-def _find_share_pid(port: str, retries: int = 20, delay: float = 0.25) -> Optional[int]:
-    """Poll for the share-loop process serving the given port (up to retries × delay s).
-
-    The CLI launcher exits immediately after disowning the real server, which
-    renames itself to susops-share-loop via exec -a.  We find it by matching
-    both the process name and the port argument in its cmdline.
-    """
-    for _ in range(retries):
-        try:
-            r = subprocess.run(['pgrep', '-f', _SHARE_LOOP_NAME],
-                               capture_output=True, text=True)
-            for pid_str in r.stdout.strip().split():
-                if not pid_str.isdigit():
-                    continue
-                pid = int(pid_str)
-                try:
-                    with open(f'/proc/{pid}/cmdline', 'rb') as f:
-                        args = f.read().replace(b'\x00', b' ').decode(errors='replace').split()
-                    if port in args:
-                        return pid
-                except OSError:
-                    continue
-        except Exception:
-            pass
-        time.sleep(delay)
-    return None
-
-
-def _wait_for_pid(pid: int) -> None:
-    """Block until the given PID disappears from the process table."""
-    while True:
-        try:
-            os.kill(pid, 0)
-        except (ProcessLookupError, OSError):
-            return
-        time.sleep(0.5)
 
 
 def open_path(path: str):
@@ -364,13 +318,6 @@ def launch_browser(exe: str, args: list[str]):
 # ── Validation helpers ────────────────────────────────────────────────────────
 def is_valid_port(value: str) -> bool:
     return value.isdigit() and 1 <= int(value) <= 65535
-
-
-def _free_port() -> int:
-    """Return a random free local port."""
-    with socket.socket() as s:
-        s.bind(('', 0))
-        return s.getsockname()[1]
 
 
 # ── GTK helpers ───────────────────────────────────────────────────────────────
@@ -938,361 +885,6 @@ class RemoveRemoteForwardDialog(_RemoveDialog):
         return f'rm -r {m.group(1)}' if m else ''
 
 
-# ── Share File dialog ─────────────────────────────────────────────────────────
-class ShareFileDialog(Gtk.Dialog):
-    def __init__(self, parent: Gtk.Window, app):
-        super().__init__(title='Share File', transient_for=parent, modal=True)
-        self._app = app
-        self.set_default_size(440, -1)
-        self.add_buttons('_Cancel', Gtk.ResponseType.CANCEL,
-                         '_Share',  Gtk.ResponseType.OK)
-        self.set_default_response(Gtk.ResponseType.OK)
-
-        self._conn     = _make_connection_row()
-        self._file_btn = Gtk.FileChooserButton(
-            title='Select file to share',
-            action=Gtk.FileChooserAction.OPEN)
-        self._password = Gtk.Entry(placeholder_text='auto-generated',
-                                   activates_default=True)
-        self._port     = Gtk.Entry(placeholder_text='auto',
-                                   activates_default=True)
-
-        grid, _ = _labeled_grid([
-            ('conn', 'Connection *:',         self._conn),
-            ('file', 'File *:',               self._file_btn),
-            ('pass', 'Password (optional):',  self._password),
-            ('port', 'Port (optional):',      self._port),
-        ])
-        self.get_content_area().add(grid)
-        _polish_dialog(self)
-        self.show_all()
-
-    def run(self):
-        tags = ConfigHelper.get_connection_tags()
-        model = self._conn.get_model(); model.clear()
-        for t in tags: self._conn.append_text(t)
-        if tags:
-            self._conn.set_active(0)
-        else:
-            self.hide()
-            _alert(self._app._root, 'No Connection',
-                   'Add a connection first.', Gtk.MessageType.ERROR)
-            return
-
-        while True:
-            resp = super().run()
-            if resp != Gtk.ResponseType.OK:
-                self.hide(); return
-
-            conn      = self._conn.get_active_text() or ''
-            file_path = self._file_btn.get_filename() or ''
-            password  = self._password.get_text().strip()
-            port_str  = self._port.get_text().strip()
-
-            if not file_path:
-                _alert(self, 'No File Selected',
-                       'Please select a file to share.',
-                       Gtk.MessageType.ERROR); continue
-            if not os.path.isfile(file_path):
-                _alert(self, 'File Not Found',
-                       f'File not found:\n{file_path}',
-                       Gtk.MessageType.ERROR); continue
-            if port_str and not is_valid_port(port_str):
-                _alert(self, 'Invalid Port',
-                       'Port must be between 1 and 65535.',
-                       Gtk.MessageType.ERROR); continue
-
-            password = password or secrets.token_hex(16)
-            port     = int(port_str) if port_str else _free_port()
-
-            self.hide()
-            self._file_btn.unselect_all()
-            self._password.set_text('')
-            self._port.set_text('')
-            self._app._start_share(conn, file_path, password, str(port))
-            return
-
-
-# ── Share Info dialog (non-modal, one per active share) ───────────────────────
-class ShareInfoDialog(Gtk.Dialog):
-    def __init__(self, parent: Gtk.Window, app, entry: dict):
-        self._entry = entry
-        name = os.path.basename(entry['file_path'])
-        super().__init__(title=f'Share Info — {name}',
-                         transient_for=parent, modal=False)
-        self._app = app
-        self.set_default_size(420, -1)
-
-        # ── Content grid ──────────────────────────────────────────────────────
-        grid = Gtk.Grid(column_spacing=12, row_spacing=8,
-                        margin_start=16, margin_end=16,
-                        margin_top=16, margin_bottom=8)
-        self.get_content_area().add(grid)
-
-        def _lbl(text):
-            l = Gtk.Label(label=text, xalign=1.0)
-            l.set_width_chars(12)
-            return l
-
-        # File row
-        grid.attach(_lbl('File:'), 0, 0, 1, 1)
-        file_val = Gtk.Label(label=entry['file_path'], xalign=0.0, hexpand=True)
-        file_val.set_ellipsize(Pango.EllipsizeMode.START)
-        grid.attach(file_val, 1, 0, 1, 1)
-
-        # Port row
-        grid.attach(_lbl('Port:'), 0, 1, 1, 1)
-        port_val = Gtk.Label(label=entry['port'], xalign=0.0, hexpand=True)
-        grid.attach(port_val, 1, 1, 1, 1)
-
-        # Password row: entry + eye toggle + copy button
-        grid.attach(_lbl('Password:'), 0, 2, 1, 1)
-        pass_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4,
-                           hexpand=True)
-        self._pass_entry = Gtk.Entry(text=entry['password'],
-                                     editable=False, visibility=False,
-                                     hexpand=True)
-        pass_box.pack_start(self._pass_entry, True, True, 0)
-
-        eye_btn = Gtk.ToggleButton()
-        eye_btn.add(Gtk.Image.new_from_icon_name('view-reveal-symbolic',
-                                                  Gtk.IconSize.BUTTON))
-        eye_btn.connect('toggled',
-                        lambda b: self._pass_entry.set_visibility(b.get_active()))
-        pass_box.pack_start(eye_btn, False, False, 0)
-
-        copy_btn = Gtk.Button(label='Copy')
-        copy_btn.connect('clicked', self._on_copy_password)
-        pass_box.pack_start(copy_btn, False, False, 0)
-        grid.attach(pass_box, 1, 2, 1, 1)
-
-        # ── Action buttons ────────────────────────────────────────────────────
-        self._stop_btn  = self.add_button('Stop',          Gtk.ResponseType.APPLY)
-        self._again_btn = self.add_button('Share Again',   Gtk.ResponseType.ACCEPT)
-        self._close_btn = self.add_button('_Close',        Gtk.ResponseType.CLOSE)
-
-        self.connect('response',     self._on_response)
-        self.connect('delete-event', self._on_delete)
-
-        self._sync_buttons()
-        _polish_dialog(self)
-        self.show_all()
-
-    # ── Helpers ───────────────────────────────────────────────────────────────
-
-    def _sync_buttons(self):
-        running = self._entry['state'] == 'running'
-        self._stop_btn.set_visible(running)
-        self._stop_btn.set_no_show_all(not running)
-        self._again_btn.set_visible(not running)
-        self._again_btn.set_no_show_all(running)
-
-    def _on_copy_password(self, _):
-        clip = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
-        clip.set_text(self._entry['password'], -1)
-
-    # ── Response handling ─────────────────────────────────────────────────────
-
-    def _on_response(self, _dlg, response):
-        if response == Gtk.ResponseType.APPLY:
-            self._stop_btn.set_sensitive(False)
-            self._app._stop_share(self._entry)
-        elif response == Gtk.ResponseType.ACCEPT:
-            self._app._restart_share(self._entry)
-        elif response in (Gtk.ResponseType.CLOSE,
-                          Gtk.ResponseType.DELETE_EVENT,
-                          Gtk.ResponseType.NONE):
-            if self._entry['state'] == 'stopped':
-                self._app._remove_share_entry(self._entry)
-            self._entry['info_dlg'] = None
-            self.hide()
-
-    def _on_delete(self, _dlg, _event):
-        self._on_response(None, Gtk.ResponseType.CLOSE)
-        return True  # suppress default destroy
-
-    # ── Live update from _on_share_exited ────────────────────────────────────
-
-    def update_to_stopped(self):
-        name = os.path.basename(self._entry['file_path'])
-        self.set_title(f'Share Info — {name} ●')
-        self._stop_btn.set_sensitive(True)   # reset in case it was disabled
-        self._sync_buttons()
-        self.show_all()
-
-    def update_to_running(self):
-        name = os.path.basename(self._entry['file_path'])
-        self.set_title(f'Share Info — {name}')
-        self._stop_btn.set_sensitive(True)
-        self._sync_buttons()
-        self.show_all()
-
-
-# ── Fetch File dialog (non-modal; stays open while download is in progress) ───
-class FetchFileDialog(Gtk.Dialog):
-    def __init__(self, parent: Gtk.Window, app):
-        super().__init__(title='Fetch File', transient_for=parent, modal=False)
-        self._app     = app
-        self._default_dest_dir = os.path.expanduser('~/Downloads')
-        self._dest_dir = self._default_dest_dir
-        self.set_default_size(440, -1)
-
-        self.add_buttons('_Cancel', Gtk.ResponseType.CANCEL,
-                         '_Fetch',  Gtk.ResponseType.OK)
-        self._fetch_btn = self.get_widget_for_response(Gtk.ResponseType.OK)
-        self._fetch_btn.set_sensitive(False)
-        self.set_default_response(Gtk.ResponseType.OK)
-
-        self._conn = _make_connection_row()
-        self._port = Gtk.Entry(placeholder_text='e.g. 54321',
-                               activates_default=True)
-
-        # Password with eye toggle
-        pass_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4,
-                           hexpand=True)
-        self._password = Gtk.Entry(placeholder_text='password',
-                                   visibility=False, activates_default=True,
-                                   hexpand=True)
-        pass_box.pack_start(self._password, True, True, 0)
-        self._eye_btn = Gtk.ToggleButton()
-        self._eye_btn.add(Gtk.Image.new_from_icon_name('view-reveal-symbolic',
-                                                        Gtk.IconSize.BUTTON))
-        self._eye_btn.connect('toggled',
-                              lambda b: self._password.set_visibility(b.get_active()))
-        pass_box.pack_start(self._eye_btn, False, False, 0)
-
-        # Save To with Browse button
-        save_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4,
-                           hexpand=True)
-        self._save_label = Gtk.Label(label=self._default_dest_dir, xalign=0.0,
-                                     hexpand=True)
-        save_box.pack_start(self._save_label, True, True, 0)
-        browse_btn = Gtk.Button(label='Browse…')
-        browse_btn.connect('clicked', self._on_browse)
-        save_box.pack_start(browse_btn, False, False, 0)
-
-        # Status label shown during download
-        self._status_label = Gtk.Label(label='Downloading…', margin_bottom=8)
-        self._status_label.set_no_show_all(True)
-
-        grid, _ = _labeled_grid([
-            ('conn', 'Connection *:', self._conn),
-            ('port', 'Port *:',       self._port),
-            ('pass', 'Password *:',   pass_box),
-            ('save', 'Save To:',     save_box),
-        ])
-        box = self.get_content_area()
-        box.add(grid)
-        box.add(self._status_label)
-
-        self._port.connect('changed',     self._on_input_changed)
-        self._password.connect('changed', self._on_input_changed)
-
-        self.connect('response',     self._on_response)
-        self.connect('delete-event', lambda d, e: d.hide() or True)
-
-        _polish_dialog(self)
-        self.show_all()
-
-    # ── Open / refresh ────────────────────────────────────────────────────────
-
-    def open(self):
-        tags = ConfigHelper.get_connection_tags()
-        model = self._conn.get_model(); model.clear()
-        for t in tags: self._conn.append_text(t)
-        if tags:
-            self._conn.set_active(0)
-        else:
-            _alert(self._app._root, 'No Connection',
-                   'Add a connection first.', Gtk.MessageType.ERROR)
-            return
-        self._reset_fields()
-        self.present()
-
-    # ── Validation ────────────────────────────────────────────────────────────
-
-    def _on_input_changed(self, *_):
-        ok = (is_valid_port(self._port.get_text().strip())
-              and bool(self._password.get_text().strip()))
-        self._fetch_btn.set_sensitive(ok)
-
-    # ── File chooser ──────────────────────────────────────────────────────────
-
-    def _on_browse(self, _):
-        chooser = Gtk.FileChooserDialog(
-            title='Select destination folder…',
-            transient_for=self,
-            action=Gtk.FileChooserAction.SELECT_FOLDER)
-        chooser.add_buttons('_Cancel', Gtk.ResponseType.CANCEL,
-                            '_Select', Gtk.ResponseType.OK)
-        if chooser.run() == Gtk.ResponseType.OK:
-            selected_dir = chooser.get_filename()
-            if selected_dir:
-                self._dest_dir = selected_dir
-                self._save_label.set_text(selected_dir)
-                self._save_label.get_style_context().remove_class('dim-label')
-        chooser.destroy()
-        self._on_input_changed()
-
-    # ── Response handling ─────────────────────────────────────────────────────
-
-    def _on_response(self, _dlg, response):
-        if response in (Gtk.ResponseType.CANCEL, Gtk.ResponseType.DELETE_EVENT,
-                        Gtk.ResponseType.CLOSE, Gtk.ResponseType.NONE):
-            self.hide()
-            return
-        if response != Gtk.ResponseType.OK:
-            return
-
-        conn     = self._conn.get_active_text() or ''
-        port     = self._port.get_text().strip()
-        password = self._password.get_text().strip()
-
-        if not all([conn, is_valid_port(port), password]):
-            return  # button guard prevents this in practice
-
-        self._fetch_btn.set_sensitive(False)
-        self._status_label.show()
-
-        cmd = (f'-c {shlex.quote(conn)} fetch {shlex.quote(port)} '
-               f'{shlex.quote(password)}')
-        run_async(cmd, self._on_fetch_done, timeout=120, cwd=self._dest_dir)
-
-    # ── Fetch callback ────────────────────────────────────────────────────────
-
-    def _on_fetch_done(self, out: str, rc: int):
-        self._status_label.hide()
-        if rc == 0:
-            # CLI prints "✅ Saved to <filename>" — extract the filename
-            saved_name = None
-            for line in out.splitlines():
-                if 'Saved to' in line:
-                    saved_name = line.split('Saved to', 1)[1].strip()
-                    break
-            dest_dir = self._dest_dir  # capture before reset
-            if saved_name:
-                saved_path = os.path.join(dest_dir, saved_name) if not os.path.isabs(saved_name) else saved_name
-            else:
-                saved_path = dest_dir
-            self.hide()
-            self._reset_fields()
-            _alert(self._app._root, 'Download Complete',
-                   f'File saved to:\n{saved_path}')
-        else:
-            self._fetch_btn.set_sensitive(True)
-            _alert(self, 'Download Failed', out, Gtk.MessageType.ERROR)
-
-    def _reset_fields(self):
-        self._dest_dir = self._default_dest_dir
-        self._save_label.set_text(self._default_dest_dir)
-        self._save_label.get_style_context().remove_class('dim-label')
-        self._port.set_text('')
-        self._password.set_text('')
-        self._password.set_visibility(False)
-        self._eye_btn.set_active(False)
-        self._on_input_changed()
-
-
 # ── About dialog ──────────────────────────────────────────────────────────────
 class AboutDialog(Gtk.Dialog):
     def __init__(self, parent: Gtk.Window):
@@ -1360,11 +952,6 @@ class SusOpsApp:
         self._dlg_rm_local     = None
         self._dlg_rm_remote    = None
         self._dlg_about        = None
-        self._dlg_share        = None
-        self._dlg_fetch        = None
-        self._active_shares    = []
-        self._ft_sub           = None   # File Transfer Gtk.Menu (for dynamic item insertion)
-        self._share_sep        = None   # separator shown when shares list is non-empty
 
         self._menu = self._build_menu()
         self._setup_indicator()
@@ -1505,26 +1092,6 @@ class SusOpsApp:
         self._browser_item = Gtk.MenuItem(label='Launch Browser')
         m.append(self._browser_item)
         self._rebuild_browser_submenu()
-        m.append(Gtk.SeparatorMenuItem())
-
-        # ── File Transfer submenu ─────────────────────────────────────────────
-        ft_item      = Gtk.MenuItem(label='File Transfer')
-        self._ft_sub = Gtk.Menu()
-
-        share_mi = Gtk.MenuItem(label='Share File…')
-        share_mi.connect('activate', self._on_share_file)
-        self._ft_sub.append(share_mi)
-
-        fetch_mi = Gtk.MenuItem(label='Fetch File…')
-        fetch_mi.connect('activate', self._on_fetch_file)
-        self._ft_sub.append(fetch_mi)
-
-        self._share_sep = Gtk.SeparatorMenuItem()
-        self._ft_sub.append(self._share_sep)
-        self._share_sep.hide()
-
-        ft_item.set_submenu(self._ft_sub)
-        m.append(ft_item)
         m.append(Gtk.SeparatorMenuItem())
 
         # ── Reset All ─────────────────────────────────────────────────────────
@@ -1894,148 +1461,6 @@ class SusOpsApp:
             self._poll()
         ))
 
-    # ── File Transfer — Share ─────────────────────────────────────────────────
-
-    def _on_share_file(self, _):
-        if self._dlg_share is None:
-            self._dlg_share = ShareFileDialog(self._root, self)
-        self._dlg_share.run()
-
-    def _start_share(self, conn: str, file_path: str, password: str, port: str):
-        cmd = ([SUSOPS_SH] if SUSOPS_SH else ['susops']) + [
-            '-c', conn, 'share', file_path, password, port]
-        proc = subprocess.Popen(cmd, start_new_session=True,
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL)
-
-        name = os.path.basename(file_path)
-        item = Gtk.MenuItem(label=f'📤 {name} (port {port})')
-        entry = {
-            'proc':      proc,
-            'pgid':      proc.pid,  # process group == launcher pid (start_new_session=True)
-            'pid':       None,      # real susops-share-loop PID; filled in by watcher
-            'port':      port,
-            'password':  password,
-            'file_path': file_path,
-            'conn':      conn,
-            'state':     'running',
-            'menu_item': item,
-            'info_dlg':  None,
-        }
-        item.connect('activate', lambda _, e=entry: self._on_share_item_clicked(e))
-        self._ft_sub.append(item)
-        item.show()
-        self._share_sep.show()
-        self._active_shares.append(entry)
-
-        def _watch():
-            # The launcher exits immediately after disowning the real server.
-            rc = proc.wait()
-            if rc != 0:
-                # Launcher itself failed — no child was spawned.
-                GLib.idle_add(self._on_share_exited, entry, rc)
-                return
-            pid = _find_share_pid(port)
-            if pid is None:
-                GLib.idle_add(self._on_share_exited, entry, 1)
-                return
-            entry['pid'] = pid
-            _wait_for_pid(pid)
-            GLib.idle_add(self._on_share_exited, entry, 0)
-        threading.Thread(target=_watch, daemon=True).start()
-
-        dlg = ShareInfoDialog(self._root, self, entry)
-        entry['info_dlg'] = dlg
-        dlg.show()
-
-    def _on_share_item_clicked(self, entry: dict):
-        if entry['info_dlg'] is None:
-            dlg = ShareInfoDialog(self._root, self, entry)
-            entry['info_dlg'] = dlg
-        entry['info_dlg'].present()
-
-    def _on_share_exited(self, entry: dict, rc: int) -> bool:
-        entry['state'] = 'stopped'
-        name = os.path.basename(entry['file_path'])
-        entry['menu_item'].set_label(f'📤 {name} (port {entry["port"]}) ●')
-        if entry['info_dlg']:
-            entry['info_dlg'].update_to_stopped()
-        if rc not in (0, -signal.SIGINT, -signal.SIGTERM, 130, 143):
-            _alert(self._root, 'Share Stopped',
-                   f'Share of {name} stopped unexpectedly (exit {rc}).',
-                   Gtk.MessageType.WARNING)
-        self._poll()
-        return False  # one-shot GLib.idle_add
-
-    def _stop_share(self, entry: dict):
-        pgid = entry.get('pgid', entry['proc'].pid)
-
-        def _kill():
-            # SIGINT to process group triggers the CLI trap (sets running=false,
-            # kills nc / handle_connection, aborts restart_susops subprocesses).
-            try:
-                os.killpg(pgid, signal.SIGINT)
-            except (ProcessLookupError, OSError):
-                return
-            # SIGKILL fallback: if the process hasn't exited after 5 s (e.g. restart_susops
-            # stalled), force-kill the whole group so _wait_for_pid can unblock.
-            time.sleep(5)
-            try:
-                os.killpg(pgid, signal.SIGKILL)
-            except (ProcessLookupError, OSError):
-                pass
-
-        threading.Thread(target=_kill, daemon=True).start()
-
-    def _restart_share(self, entry: dict):
-        if not os.path.isfile(entry['file_path']):
-            _alert(self._root, 'File Not Found',
-                   f'File no longer exists:\n{entry["file_path"]}',
-                   Gtk.MessageType.ERROR)
-            return
-        cmd = ([SUSOPS_SH] if SUSOPS_SH else ['susops']) + [
-            '-c', entry['conn'], 'share',
-            entry['file_path'], entry['password'], entry['port']]
-        proc = subprocess.Popen(cmd, start_new_session=True,
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL)
-        entry['proc']  = proc
-        entry['pgid']  = proc.pid  # new process group for re-launched share
-        entry['pid']   = None      # reset; watcher will fill in the real PID
-        entry['state'] = 'running'
-        name = os.path.basename(entry['file_path'])
-        entry['menu_item'].set_label(f'📤 {name} (port {entry["port"]})')
-        if entry['info_dlg']:
-            entry['info_dlg'].update_to_running()
-
-        def _watch():
-            rc = proc.wait()
-            if rc != 0:
-                GLib.idle_add(self._on_share_exited, entry, rc)
-                return
-            pid = _find_share_pid(entry['port'])
-            if pid is None:
-                GLib.idle_add(self._on_share_exited, entry, 1)
-                return
-            entry['pid'] = pid
-            _wait_for_pid(pid)
-            GLib.idle_add(self._on_share_exited, entry, 0)
-        threading.Thread(target=_watch, daemon=True).start()
-
-    def _remove_share_entry(self, entry: dict):
-        if entry in self._active_shares:
-            self._active_shares.remove(entry)
-        entry['menu_item'].destroy()
-        if not self._active_shares:
-            self._share_sep.hide()
-
-    # ── File Transfer — Fetch ─────────────────────────────────────────────────
-
-    def _on_fetch_file(self, _):
-        if self._dlg_fetch is None:
-            self._dlg_fetch = FetchFileDialog(self._root, self)
-        self._dlg_fetch.open()
-
     # ── About ─────────────────────────────────────────────────────────────────
 
     def _on_about(self, _):
@@ -2046,15 +1471,8 @@ class SusOpsApp:
     # ── Quit ──────────────────────────────────────────────────────────────────
 
     def _on_quit(self, _):
-        for entry in list(self._active_shares):
-            if entry['state'] == 'running':
-                pgid = entry.get('pgid', entry['proc'].pid)
-                try:
-                    os.killpg(pgid, signal.SIGINT)
-                except (ProcessLookupError, OSError):
-                    pass
         if self.config.get('stop_on_quit', True):
-            run_cmd('stop --keep-ports --fileshares', timeout=15)
+            run_cmd('stop --keep-ports', timeout=15)
         Gtk.main_quit()
 
 

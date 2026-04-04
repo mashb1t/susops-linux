@@ -83,7 +83,7 @@ To uninstall:
 ./build.sh --uninstall
 ```
 
-#### 3. Configure
+### 4. Configure
 
 1. Launch the application (`susops`)
 2. Set up your SSH host and ports in the **Settings** menu
