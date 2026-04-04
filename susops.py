@@ -13,6 +13,7 @@ import signal
 import socket
 import subprocess
 import threading
+import time
 from enum import Enum
 from pathlib import Path
 from typing import Optional
@@ -303,6 +304,47 @@ def run_async(susops_args: str, callback, timeout: int = 30, cwd: str | None = N
         out, rc = run_cmd(susops_args, timeout, cwd=cwd)
         GLib.idle_add(callback, out, rc)
     threading.Thread(target=_worker, daemon=True).start()
+
+
+_SHARE_LOOP_NAME = 'susops-share-loop'
+
+
+def _find_share_pid(port: str, retries: int = 20, delay: float = 0.25) -> Optional[int]:
+    """Poll for the share-loop process serving the given port (up to retries × delay s).
+
+    The CLI launcher exits immediately after disowning the real server, which
+    renames itself to susops-share-loop via exec -a.  We find it by matching
+    both the process name and the port argument in its cmdline.
+    """
+    for _ in range(retries):
+        try:
+            r = subprocess.run(['pgrep', '-f', _SHARE_LOOP_NAME],
+                               capture_output=True, text=True)
+            for pid_str in r.stdout.strip().split():
+                if not pid_str.isdigit():
+                    continue
+                pid = int(pid_str)
+                try:
+                    with open(f'/proc/{pid}/cmdline', 'rb') as f:
+                        args = f.read().replace(b'\x00', b' ').decode(errors='replace').split()
+                    if port in args:
+                        return pid
+                except OSError:
+                    continue
+        except Exception:
+            pass
+        time.sleep(delay)
+    return None
+
+
+def _wait_for_pid(pid: int) -> None:
+    """Block until the given PID disappears from the process table."""
+    while True:
+        try:
+            os.kill(pid, 0)
+        except (ProcessLookupError, OSError):
+            return
+        time.sleep(0.5)
 
 
 def open_path(path: str):
@@ -1870,6 +1912,8 @@ class SusOpsApp:
         item = Gtk.MenuItem(label=f'📤 {name} (port {port})')
         entry = {
             'proc':      proc,
+            'pgid':      proc.pid,  # process group == launcher pid (start_new_session=True)
+            'pid':       None,      # real susops-share-loop PID; filled in by watcher
             'port':      port,
             'password':  password,
             'file_path': file_path,
@@ -1885,8 +1929,19 @@ class SusOpsApp:
         self._active_shares.append(entry)
 
         def _watch():
+            # The launcher exits immediately after disowning the real server.
             rc = proc.wait()
-            GLib.idle_add(self._on_share_exited, entry, rc)
+            if rc != 0:
+                # Launcher itself failed — no child was spawned.
+                GLib.idle_add(self._on_share_exited, entry, rc)
+                return
+            pid = _find_share_pid(port)
+            if pid is None:
+                GLib.idle_add(self._on_share_exited, entry, 1)
+                return
+            entry['pid'] = pid
+            _wait_for_pid(pid)
+            GLib.idle_add(self._on_share_exited, entry, 0)
         threading.Thread(target=_watch, daemon=True).start()
 
         dlg = ShareInfoDialog(self._root, self, entry)
@@ -1913,10 +1968,24 @@ class SusOpsApp:
         return False  # one-shot GLib.idle_add
 
     def _stop_share(self, entry: dict):
-        try:
-            os.killpg(os.getpgid(entry['proc'].pid), signal.SIGINT)
-        except (ProcessLookupError, OSError):
-            pass
+        pgid = entry.get('pgid', entry['proc'].pid)
+
+        def _kill():
+            # SIGINT to process group triggers the CLI trap (sets running=false,
+            # kills nc / handle_connection, aborts restart_susops subprocesses).
+            try:
+                os.killpg(pgid, signal.SIGINT)
+            except (ProcessLookupError, OSError):
+                return
+            # SIGKILL fallback: if the process hasn't exited after 5 s (e.g. restart_susops
+            # stalled), force-kill the whole group so _wait_for_pid can unblock.
+            time.sleep(5)
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except (ProcessLookupError, OSError):
+                pass
+
+        threading.Thread(target=_kill, daemon=True).start()
 
     def _restart_share(self, entry: dict):
         if not os.path.isfile(entry['file_path']):
@@ -1931,17 +2000,26 @@ class SusOpsApp:
                                 stdout=subprocess.DEVNULL,
                                 stderr=subprocess.DEVNULL)
         entry['proc']  = proc
+        entry['pgid']  = proc.pid  # new process group for re-launched share
+        entry['pid']   = None      # reset; watcher will fill in the real PID
         entry['state'] = 'running'
         name = os.path.basename(entry['file_path'])
         entry['menu_item'].set_label(f'📤 {name} (port {entry["port"]})')
         if entry['info_dlg']:
             entry['info_dlg'].update_to_running()
 
-        # TODO check how to get resulting PID from CLI and update entry['proc'] accordingly, in case CLI spawns a child process for the share (currently the CLI process may not reflect the actual share PID due to disown and child processs spawn)
-
         def _watch():
             rc = proc.wait()
-            GLib.idle_add(self._on_share_exited, entry, rc)
+            if rc != 0:
+                GLib.idle_add(self._on_share_exited, entry, rc)
+                return
+            pid = _find_share_pid(entry['port'])
+            if pid is None:
+                GLib.idle_add(self._on_share_exited, entry, 1)
+                return
+            entry['pid'] = pid
+            _wait_for_pid(pid)
+            GLib.idle_add(self._on_share_exited, entry, 0)
         threading.Thread(target=_watch, daemon=True).start()
 
     def _remove_share_entry(self, entry: dict):
@@ -1970,8 +2048,9 @@ class SusOpsApp:
     def _on_quit(self, _):
         for entry in list(self._active_shares):
             if entry['state'] == 'running':
+                pgid = entry.get('pgid', entry['proc'].pid)
                 try:
-                    os.killpg(os.getpgid(entry['proc'].pid), signal.SIGINT)
+                    os.killpg(pgid, signal.SIGINT)
                 except (ProcessLookupError, OSError):
                     pass
         if self.config.get('stop_on_quit', True):
