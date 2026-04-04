@@ -1905,7 +1905,7 @@ class SusOpsApp:
         entry['menu_item'].set_label(f'📤 {name} (port {entry["port"]}) ●')
         if entry['info_dlg']:
             entry['info_dlg'].update_to_stopped()
-        if rc != 0:
+        if rc not in (0, -signal.SIGINT, -signal.SIGTERM, 130, 143):
             _alert(self._root, 'Share Stopped',
                    f'Share of {name} stopped unexpectedly (exit {rc}).',
                    Gtk.MessageType.WARNING)
@@ -1936,6 +1936,8 @@ class SusOpsApp:
         entry['menu_item'].set_label(f'📤 {name} (port {entry["port"]})')
         if entry['info_dlg']:
             entry['info_dlg'].update_to_running()
+
+        # TODO check how to get resulting PID from CLI and update entry['proc'] accordingly, in case CLI spawns a child process for the share (currently the CLI process may not reflect the actual share PID due to disown and child processs spawn)
 
         def _watch():
             rc = proc.wait()
@@ -1973,7 +1975,7 @@ class SusOpsApp:
                 except (ProcessLookupError, OSError):
                     pass
         if self.config.get('stop_on_quit', True):
-            run_cmd('stop --keep-ports', timeout=15)
+            run_cmd('stop --keep-ports --fileshares', timeout=15)
         Gtk.main_quit()
 
 
